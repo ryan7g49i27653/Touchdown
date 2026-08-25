@@ -17,6 +17,58 @@ So out of the box a tap clicks wherever the cursor already sits. The driver seiz
 
 Controller is `wch.cn` VID `0x27c0` / PID `0x0859`.
 
+## Break-glass: taps stopped working
+
+Read the log first — it is the diagnosis, and every branch below is a line from it:
+
+```bash
+pgrep -f Touchdown; tail -20 /tmp/touchdown.log
+```
+
+Then match the symptom. After a macOS upgrade it is almost always **1** or **2**.
+
+**1. `PERMISSION REQUIRED` → Accessibility is missing.** Major OS upgrades can clear TCC. This build is ad-hoc, so grants are pinned to the binary's `cdhash`; a stale entry stays visible in the Privacy list while being completely inert, so it looks granted when it is not. Clear rather than toggle, then re-add `~/Applications/Touchdown.app` to **both** lists, then restart (step 5):
+
+```bash
+tccutil reset Accessibility com.bencolson.touchdown && tccutil reset ListenEvent com.bencolson.touchdown
+```
+
+**2. `could not open IOHIDManager (code: -536870174)` → Input Monitoring is missing.** That is `0xE00002E2`, `kIOReturnNotPermitted`. This path does **not** retry, so the driver parks there permanently. Granting alone is not enough — you must restart it afterwards.
+
+**3. `Touchscreen not found`, retrying every 3s → the panel is not visible on USB.**
+
+```bash
+ioreg -c IOHIDDevice -r -l | grep -c '"ProductID" = 2137'
+```
+
+Zero means macOS cannot see it at all — cable, port, or hardware. Non-zero while the driver still retries means something else holds the device; iCUE is the usual culprit.
+
+**4. `Driver active` but nothing happens → the HID-manager fix has been lost.** This is the exact signature of the bug documented below: open and seize both succeed, so it advertises itself as working while receiving nothing. Verify the fix is still in the source, and that only one instance is running (two would fight over the exclusive seize):
+
+```bash
+grep -c hidManager ~/Projects/touchdown/TouchscreenDriver.swift   # expect 2
+```
+
+**5. Restart — required after any permission change:**
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.bencolson.touchdown.plist; sleep 2; launchctl load ~/Library/LaunchAgents/com.bencolson.touchdown.plist
+```
+
+**6. Taps land on the wrong monitor → the display fix has been lost.** `grep -c deviceDescription ~/Projects/touchdown/TouchscreenDriver.swift` should be `1`.
+
+**7. Still broken — rebuild from source.** Costs one re-grant of both permissions, because ad-hoc signing produces a new `cdhash` every compile:
+
+```bash
+cd ~/Projects/touchdown && SIGN_IDENTITY=- ./install.sh
+```
+
+If **4** or **6** ever fires, suspect the patched build was replaced. Auto-update is disabled, but confirm — a stock build reports `Active` and silently does nothing:
+
+```bash
+defaults read com.bencolson.touchdown SUEnableAutomaticChecks   # expect 0
+```
+
 ## Machine roles
 
 - **Client** — where the panel is plugged in and the driver runs. Needs only `./install.sh`.

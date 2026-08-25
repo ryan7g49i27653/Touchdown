@@ -6,6 +6,8 @@ Without it, macOS ignores the panel's HID digitizer interface (usage page `0x0D`
 
 > Fork of [ymlaine/TouchscreenDriver](https://github.com/ymlaine/TouchscreenDriver), originally co-authored by [Yves-Marie Lainé](https://github.com/ymlaine) and Claude.
 
+> ⚠️ **This working copy carries local patches not present in the published v1.5.0 release.** Two bugs fixed — the `IOHIDManager` being released on return from `attachDriver()` (driver reported "Active" while receiving no events at all), and `findXeneonDisplayID()` selecting the wrong display when three or more are connected. Per-touch logging is also now off by default behind `LogTouchPoints`. See `CLAUDE.md` → *First hardware bring-up* for the full detail. Installing the published release over this copy reverts all of it.
+
 ## What this fork changes
 
 **Installs as a signed `.app` bundle, not a bare binary.** macOS TCC will not register a raw Mach-O executable for Accessibility — it never appears in the Privacy & Security list, so the permission can't be granted and clicks can never be injected. `tccutil reset Accessibility` on the installed binary confirms it: *"No such bundle identifier."* There was no record to toggle. Only a code-signed bundle with a `CFBundleIdentifier` gets a TCC record.
@@ -52,9 +54,11 @@ Released builds are Developer ID signed and notarized, so the designated require
 
 ## Requirements
 
-- macOS 11+ (Big Sur or later)
+- macOS 11+ (Big Sur or later) — but see the caveat below; a build only runs on the macOS version it was **built on** or newer
 - Corsair Xeneon Edge connected via USB-C
 - Xcode Command Line Tools (`xcode-select --install`) — **only** to build from source; installing the release needs nothing
+
+> **Minimum-OS caveat.** `build.sh` does not pass `-target`, so `swiftc` stamps the *build host's* OS version into the binary's `LC_BUILD_VERSION`. A build produced on macOS 26 reports `minos 26.0` and will not launch on anything earlier, even though `Info.plist` still advertises `LSMinimumSystemVersion 11.0` — it installs cleanly and then does nothing. Check with `otool -l <binary> | grep -A3 LC_BUILD_VERSION`. Building on the machine you intend to run on avoids the problem entirely.
 
 ## Installation
 
@@ -133,7 +137,11 @@ Grant both to **`Touchdown.app`** — not to Terminal, and not to a bare binary:
 2. **Input Monitoring** — to capture HID events (exclusive seize)
    - System Settings → Privacy & Security → Input Monitoring
 
-The driver waits for the grant and continues within 2 seconds. You do not need to restart it.
+**Grant both before the driver attaches, or restart it afterwards.** The two permissions are not checked the same way. Accessibility is polled every 2 seconds, so granting it mid-run is picked up without a restart. Input Monitoring is only evaluated inside `IOHIDManagerOpen()`, and that path does not retry — so if Accessibility is granted first, the driver runs straight at the HID open while Input Monitoring is still missing, fails with `kIOReturnNotPermitted`, and stays parked there until restarted:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.bencolson.touchdown.plist; sleep 2; launchctl load ~/Library/LaunchAgents/com.bencolson.touchdown.plist
+```
 
 If the app doesn't appear in the list, drag `~/Applications/Touchdown.app` in directly.
 
@@ -250,6 +258,8 @@ The driver is pre-calibrated for the Xeneon Edge touchscreen:
 - X range: 0 - 16383
 - Y range: 0 - 9599
 - Touch detection: Button 1 (HID Usage Page 0x09)
+
+These were confirmed correct on real hardware (2026-08-21) by tapping all four physical corners and reverse-mapping the injected coordinates to raw HID values — see `CLAUDE.md` for the data. Note that a small inset at each edge is finger contact area, not a calibration error: a genuinely wrong maximum shows up as an *asymmetric* result, near-zero inset at the origin end and large at the far end.
 
 ### Re-calibrate (if needed)
 

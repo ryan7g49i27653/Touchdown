@@ -62,12 +62,24 @@ echo "✅ Compiled"
 
 echo "📦 Building app bundle..."
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 mv "$OUT_DIR/.$APP_NAME.bin" "$EXEC_PATH"
 chmod +x "$EXEC_PATH"
 
 # -R preserves the framework's symlink farm, which codesign requires intact.
 cp -R "$SPARKLE" "$APP/Contents/Frameworks/"
+
+# The icon is committed rather than generated here: make-icon.swift needs a
+# full AppKit render and the artwork changes far less often than the code.
+# Without Contents/Resources and the CFBundleIconFile key below, macOS falls
+# back to the generic placeholder everywhere the app is listed -- most visibly
+# the Privacy & Security panes, which is where a driver is actually looked at.
+if [ -f "$SCRIPT_DIR/$APP_NAME.icns" ]; then
+    cp "$SCRIPT_DIR/$APP_NAME.icns" "$APP/Contents/Resources/"
+else
+    echo "⚠️  $APP_NAME.icns missing -- building with the generic icon."
+    echo "   Regenerate it with: swift make-icon.swift . && iconutil -c icns $APP_NAME.iconset -o $APP_NAME.icns"
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -81,6 +93,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
     <key>CFBundleExecutable</key>
+    <string>$APP_NAME</string>
+    <key>CFBundleIconFile</key>
     <string>$APP_NAME</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>

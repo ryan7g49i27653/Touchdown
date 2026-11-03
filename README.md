@@ -26,6 +26,8 @@ Released builds are Developer ID signed and notarized, so the designated require
 
 ## Menu bar
 
+The status item uses the `hand.rays` SF Symbol as a template image. The app icon uses `hand.tap.fill` instead — an outlined glyph with thin rays is right for a monochrome menu bar mark and turns to mush when rendered as icon art, so the two are drawn from different symbols on purpose.
+
 | Icon | Meaning |
 |---|---|
 | Dimmed | Waiting on Accessibility permission, or waiting for the panel to appear |
@@ -295,8 +297,10 @@ Display:
 
 | File | Description |
 |------|-------------|
-| `TouchscreenDriver.swift` | Main driver: HID capture, CGEvent injection, menu bar, Sparkle |
+| `TouchscreenDriver.swift` | Main driver: HID capture, CGEvent injection, menu bar |
 | `HIDAnalyzer.swift` | Diagnostic tool to inspect raw HID reports |
+| `make-icon.swift` | Regenerates `Touchdown.icns`; not run by the build |
+| `Touchdown.icns` | App icon, committed so builds need no render step |
 | `version.sh` | Single source of truth for version, bundle ID, feed URL, public key |
 | `build.sh` | Builds and signs `Touchdown.app` into a given directory |
 | `install.sh` | Builds, installs to `~/Applications`, registers the LaunchAgent |

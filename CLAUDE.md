@@ -105,6 +105,23 @@ Raw X spanned `160..16242` (insets 0.98% / 0.86% — symmetric). Raw Y spanned `
 
 Four taps produced exactly four clicks, so the 50ms debounce still holds under exclusive capture on 27.
 
+### App icon added (2026-11-03)
+
+The bundle had no `Contents/Resources` and no `CFBundleIconFile`, so macOS drew the generic placeholder everywhere the app is listed — most visibly the Privacy & Security panes, which for a driver that needs two grants is exactly where it gets looked at.
+
+`Touchdown.icns` is committed and `build.sh` copies it in; `make-icon.swift` regenerates it and is **not** run by the build:
+
+```bash
+swift make-icon.swift . && iconutil -c icns Touchdown.iconset -o Touchdown.icns
+```
+
+Two things worth not rediscovering:
+
+- **32px is the size to design for, not 16px.** The Privacy lists lay out at 16pt, which on any Retina display draws the `@2x` asset. Judging the art at 16px leads you to over-simplify.
+- **Outlined SF Symbols do not survive as icon art.** The first attempt reused `hand.rays` from the menu bar status item for continuity. It was an unreadable smudge at 16px and mush at 32px — the rays are hairlines. `hand.tap.fill` is filled and holds up. The menu bar keeps `hand.rays`, because a template image at menu bar size has the opposite constraint. Same reason the glyph drop shadow is skipped at or below 32px: the blur ends up wider than the strokes it sits under.
+
+The glyph is nudged off geometric centre (`-1.0%` x, `+1.8%` y) because its mass sits bottom-right while the tap arc is light and top-left.
+
 ### Update UI removed (2026-11-03)
 
 The menu bar drop-down no longer has *Check for Updates…* or a *Version* line, and `StatusController` no longer builds an `SPUStandardUpdaterController`. Removing only the menu items would have left the updater running with no interface — `startingUpdater: true` schedules background checks independently of the menu, and `Info.plist` sets `SUEnableAutomaticChecks` true while the pref that disables it does not travel between machines. So the updater went too. Verify which build you are holding:

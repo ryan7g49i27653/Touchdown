@@ -38,3 +38,7 @@ vendor/
 
 # Release artifacts
 dist/
+
+# Icon intermediate. make-icon.swift emits this iconset; only the .icns that
+# iconutil builds from it is committed.
+Touchdown.iconset/

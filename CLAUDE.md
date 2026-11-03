@@ -17,6 +17,8 @@ So out of the box a tap clicks wherever the cursor already sits. The driver seiz
 
 Controller is `wch.cn` VID `0x27c0` / PID `0x0859`.
 
+**Where things stand:** the most recent dated section below is the current state of play; everything above it in the file is either triage or facts that do not change. Sections are newest-first within a date and the dates run newest-first too, so reading from *Break-glass* down gives you the present before the history.
+
 ## Break-glass: taps stopped working
 
 Read the log first — it is the diagnosis, and every branch below is a line from it:
@@ -69,15 +71,15 @@ If **4** or **6** ever fires, suspect the patched build was replaced — a stock
 # Identify the build. 1.5.0 is upstream's version; this fork is 1.6.0+ and
 # stamps the exact source commit it was built from.
 plutil -p ~/Applications/Touchdown.app/Contents/Info.plist | grep -E 'VersionString|CFBundleVersion|TDSource'
-#   "CFBundleShortVersionString" => "1.6.0"   <- 1.5.0 means a stock build
-#   "CFBundleVersion"            => "35"      <- commit count
-#   "TDSourceCommit"             => "c29e814" <- "-dirty" = built from uncommitted work
+#   "CFBundleShortVersionString" => "1.6.0"  <- 1.5.0 means a stock build
+#   "CFBundleVersion"            => "<n>"    <- commit count at build time
+#   "TDSourceCommit"             => "<sha>"  <- "-dirty" = built from uncommitted work
 
 # Corroborate: this fork embeds no frameworks at all, a stock build has Sparkle.
 test -d ~/Applications/Touchdown.app/Contents/Frameworks && echo "STOCK BUILD" || echo "this fork"
 ```
 
-`TDSourceCommit` also answers "is the second machine current?" — compare it against `git rev-parse --short HEAD`. The same three values appear in the menu bar's *About Touchdown*, as `Version 1.6.0 (35 · c29e814)`.
+`TDSourceCommit` also answers "is the second machine current?" — compare it against `git rev-parse --short HEAD`. The same three values appear in the menu bar's *About Touchdown*, as `Version 1.6.0 (<n> · <sha>)`.
 
 Nothing can replace it automatically — there is no updater and no feed — so a swapped build means someone copied a bundle in by hand.
 
@@ -87,7 +89,21 @@ Both machines are clients: the panel is plugged in and the driver runs, installe
 
 Everything about Developer ID certificates, notarization profiles, Sparkle signing keys and release cutting was **upstream maintainer** infrastructure. It was removed on 2026-11-03 along with Sparkle itself — see *Sparkle removed* below. If you are reading an older commit and wondering where `release.sh`, `setup-release-machine.sh`, `install-release.sh`, `fetch-sparkle.sh` or `appcast.xml` went, that is where.
 
-## Status — macOS 27.2 verified (2026-11-03)
+## 2026-11-03 — the macOS 27 upgrade, and everything that followed
+
+The upgrade itself was a non-event; the day's work came out of looking closely
+while we were in there. Subsections below are **newest first**, after the
+verification itself.
+
+| | |
+|---|---|
+| *Calibration re-confirmed* | corner taps reverse-mapped again on 27 |
+| *Cleanup* | dead files removed, the analyzer's TCC trap documented, comments translated |
+| *Tests, and CI that actually runs* | first test suite; CI had never run on this branch |
+| *Versioning* | 1.6.0, plus build number and source commit derived from git |
+| *Code review — five fixes* | cursor leak, observer leak, `pkill -f`, log location, duplicated predicate |
+| *App icon* / *About panel* | the menu bar and Privacy panes stop showing a placeholder |
+| *Sparkle removed entirely* | no updater, no feed, no release pipeline |
 
 The client was upgraded to macOS 27.2 (build 26B123, Xcode 27.2, Swift 6.4.2). **Nothing about the upgrade broke the driver**, and one assumption in this file turned out to be wrong in a good way.
 
@@ -113,7 +129,7 @@ Raw X spanned `160..16242` (insets 0.98% / 0.86% — symmetric). Raw Y spanned `
 
 Four taps produced exactly four clicks, so the 50ms debounce still holds under exclusive capture on 27.
 
-### Cleanup — dead files, the analyzer's TCC trap (2026-11-03)
+### Cleanup — dead files, the analyzer's TCC trap
 
 **Deleted `com.ymlaine.touchscreendriver.plist`.** Upstream's LaunchAgent, pointing at `/usr/local/bin/TouchscreenDriver`. Nothing installed it; `uninstall.sh` only ever removed the *installed* copy under `~/Library/LaunchAgents`. It described the bare-binary layout this fork exists to avoid, since a raw Mach-O gets no TCC record at all.
 
@@ -123,7 +139,7 @@ The README was actively self-contradictory about this: one section said to grant
 
 **`run_analyzer.sh` keeps the same property, deliberately.** `HIDAnalyzer` is only ever run as a bare binary, so reading HID really does require granting Input Monitoring to Terminal. That is now documented in the script's header and in the README rather than left as a surprise, with a note to revoke it afterwards.
 
-### Tests, and CI that actually runs (2026-11-03)
+### Tests, and CI that actually runs
 
 There were no tests at all, and the CI workflow had never run against this fork's code: it triggered on `push: branches: [main]`, but `main` is pure upstream and every change lives on `local`. It was asserting things about a branch nobody commits to. `local` is now in the trigger list, and `./run_tests.sh` runs ahead of the build.
 
@@ -137,7 +153,7 @@ No XCTest, no SwiftPM. The project builds with one bare `swiftc` call and has no
 
 Not covered, and honestly so: anything needing hardware or TCC — the HID callback, the retry loop, the permission states, and `injectClick`'s cursor balance, whose fix is structural (a `defer`) rather than testable without faking the CoreGraphics calls.
 
-### Versioning (2026-11-03)
+### Versioning
 
 `1.5.0` was **upstream's** version, and carrying it after removing the updater, adding an icon and an About panel and fixing five bugs made two very different builds indistinguishable. The fork is now `1.6.0`, and version identity is split three ways:
 
@@ -153,7 +169,7 @@ Deriving the latter two means a build always identifies itself, which is what ac
 
 A trap this closed: the startup banner had `v1.5.0` written into the ASCII box as a literal, independent of `version.sh`. Bumping the version would have desynced the banner from the Info.plist silently. The banner now reads `CFBundleShortVersionString` from the bundle and pads it to the box's 11-column field, falling back to `dev` when there is no Info.plist to read. Alignment is asserted by the test suite.
 
-### Code review — five fixes (2026-11-03)
+### Code review — five fixes
 
 A hygiene/performance/security pass over the whole fork. The security half came out clean: the installed binary has **zero** networking symbols, links no network-capable framework, has no `CGEventTapCreate` (so it cannot read keystrokes despite holding Accessibility), no `system` / `posix_spawn` / `dlopen` / `NSTask`, no entitlements, and exactly one embedded path. That is a stronger result than the August audit of upstream's v1.5.0, because Sparkle — the only third-party code and the only route to the network — is gone.
 
@@ -176,7 +192,7 @@ Two things were looked at and deliberately **not** changed:
 
 Also note `clickMode` and `captureMode` are never reassigned but are correctly `var`: they are source-level escape hatches (the HID-failure message tells you to edit `captureMode`), and `let` would raise dead-code warnings on the unused branch.
 
-### App icon added (2026-11-03)
+### App icon added
 
 The bundle had no `Contents/Resources` and no `CFBundleIconFile`, so macOS drew the generic placeholder everywhere the app is listed — most visibly the Privacy & Security panes, which for a driver that needs two grants is exactly where it gets looked at.
 
@@ -193,7 +209,7 @@ Two things worth not rediscovering:
 
 The glyph is nudged off geometric centre (`-1.0%` x, `+1.8%` y) because its mass sits bottom-right while the tap arc is light and top-left.
 
-### About panel added (2026-11-03)
+### About panel added
 
 *About Touchdown* in the menu opens `NSApp.orderFrontStandardAboutPanel` — the system panel, so it inherits dark mode, layout and localisation rather than being a hand-built window. It carries the app icon, name, version and a one-paragraph description passed as `.credits`.
 
@@ -206,7 +222,7 @@ Note the panel *does* show the version, which the menu deliberately no longer do
 
 A verification wrinkle: `strings` on the binary will not find `About Touchdown`, `Quit Touchdown` or `Open Log`. Swift stores string literals of 15 UTF-8 bytes or fewer inline in the `String` struct rather than in `__cstring`, so short menu titles are invisible to `strings` while `Redetect Display` (16 bytes) shows up. Grep for the `showAbout` selector instead.
 
-### Sparkle removed entirely (2026-11-03)
+### Sparkle removed entirely
 
 Done in two steps on the same day, which is why the git history shows it twice.
 
@@ -228,11 +244,11 @@ test -d ~/Applications/Touchdown.app/Contents/Frameworks && echo "STOCK BUILD" |
 
 `build.sh` also pins `-target $(uname -m)-apple-macos11.0`. This became load-bearing rather than theoretical: the first rebuild on 27.2 stamped `minos 27.2`, which would have refused to launch on the second machine. See the rough edge below.
 
-## Status — client bring-up complete (2026-08-21)
+## 2026-08-21 — client bring-up complete
 
 Both items that were outstanding here are cleared. The driver has now run against real touch input for the first time: permissions granted, taps landing under the finger across the full 2560×720, and the inherited calibration confirmed correct.
 
-Getting there required fixing two real bugs — see *First hardware bring-up* below. Neither was visible until the driver was actually receiving events, which is why both survived into a shipped release.
+Getting there required fixing two real bugs — see *first hardware bring-up* below. Neither was visible until the driver was actually receiving events, which is why both survived into a shipped release.
 
 ### Deployment on this machine
 
@@ -281,7 +297,7 @@ main (7031ea1, pure upstream v1.5.0 -- every commit authored by the maintainer)
 
 There is no `upstream` remote configured, so pulling the maintainer's changes means adding one. Expect conflicts in `build.sh` and `version.sh` — `local` has diverged structurally, not just by a patch or two.
 
-## First hardware bring-up (2026-08-21)
+## 2026-08-21 — first hardware bring-up: two bugs found
 
 Two bugs, both fixed in this fork's `TouchscreenDriver.swift`, neither fixed upstream as of v1.5.0.
 
@@ -434,14 +450,20 @@ The LaunchAgent uses `KeepAlive { SuccessfulExit = false }`, so any non-zero exi
 
 ### What CI checks
 
-`.github/workflows/build.yml` compiles, bundles, signs ad-hoc, and asserts three things that are otherwise invisible until something breaks on another machine: that the bundle embeds **no** frameworks and links nothing via `@rpath`, that the icon is present, and that `minos` is `11.0` rather than the runner's OS. It publishes nothing, because this fork releases nothing. Ad-hoc builds skip `--options runtime` and `--timestamp`, which `codesign` rejects for ad-hoc signatures.
+`.github/workflows/build.yml` runs `./run_tests.sh`, then compiles, bundles and signs ad-hoc, builds the analyzer, and syntax-checks every shell script.
+
+Its bundle assertions are the ones that are otherwise invisible until something breaks on *another* machine: the bundle embeds **no** frameworks and links nothing via `@rpath`, the icon is present, and `minos` is `11.0` rather than the runner's OS.
+
+It triggers on pushes to `main` **and `local`**. That second branch is the whole point and was missing until 2026-11-03: `main` is pure upstream, so for months the workflow ran only against code nobody was changing. If you add a working branch, add it here too or it is unverified.
+
+It publishes nothing, because this fork releases nothing. Ad-hoc builds skip `--options runtime` and `--timestamp`, which `codesign` rejects for ad-hoc signatures.
 
 ## Known rough edges
 
-- **Display naming varies by unit.** This file used to state flatly that the panel reports as `Type-C`, so the name match in `setupScreen()` always fails and selection is by elimination. On the unit tested 2026-08-21 it reports **`XENEON EDGE`** and the name match succeeds. Treat `Type-C` as one possible name rather than the rule — and note that the disagreement between name-matching and elimination is exactly what produced the display bug documented above.
+- **Display naming varies by unit.** This file used to state flatly that the panel reports as `Type-C`, so the name match in `setupScreen()` always fails and selection is by elimination. On the unit tested 2026-08-21 it reports **`XENEON EDGE`** and the name match succeeds. Treat `Type-C` as one possible name rather than the rule — and note that the disagreement between name-matching and elimination is exactly what produced the display bug documented above. `tests/main.swift` asserts that `Type-C` does **not** match, so the gap is explicit: if you ever make it match, that assertion fails and forces the decision.
 - **Comments are English as of 2026-11-03.** They were French — upstream is French throughout — and kept that way to keep the diff against upstream reviewable. That rationale expired: `local` has diverged structurally, and the upstream-facing branches (`fix-hid-lifetime-and-display-selection`, `pin-deployment-target`) carry their own French comments untouched, so nothing upstream would receive is affected. If you cherry-pick between `local` and those branches, expect comment-only conflicts.
 - **Swift 6 language mode is not enabled.** `swiftc` defaults to Swift 5 mode, which is why the mutable globals mutated from the C HID callback compile without concurrency errors. Do not add `-swift-version 6` expecting a no-op.
-- **`touchscreenMaxX/Y` are verified** as of 2026-08-21 — `16383` / `9599` are correct on this unit. See the calibration table above for the method and the raw numbers.
+- **`touchscreenMaxX/Y` are verified** — `16383` / `9599` are correct on this unit, established 2026-08-21 and re-confirmed 2026-11-03. See the calibration tables above for the method and the raw numbers. **The test suite now asserts both constants**, so changing one fails `./run_tests.sh`; update `tests/main.swift` deliberately if you ever re-calibrate.
 - **A build's minimum OS was the build host's — now pinned.** `build.sh` passes `-target $(uname -m)-apple-macos11.0` as of 2026-11-03, so `LC_BUILD_VERSION` matches the `LSMinimumSystemVersion 11.0` in `Info.plist`. Without it `swiftc` stamps the host's version, and the macOS 27 upgrade turned that from theory into a live hazard: the first rebuild here produced `minos 27.2`, which would have refused to launch on the second machine had it still been on 26. To a user on an older OS that looks like "installs cleanly, then does nothing", with nothing in the log. The **published release is still affected**, depending on the maintainer's build host — the pin lives only on this fork. 11.0 used to be forced by the vendored Sparkle, which was itself `minos 11.0`; with Sparkle gone the only constraint left is the `LSMinimumSystemVersion` in `Info.plist`, so keep the two in step if you ever raise it. CI asserts the pin; verify by hand with `vtool -show-build <binary>`.
 - **`Warning: Window move completed without beginning` in the log is harmless.** AppKit emits it when the About panel is ordered front, and it lands in `~/Library/Logs/Touchdown.log` because the LaunchAgent sends stderr there. Observed once per panel open, 32s after launch on 2026-11-03, i.e. exactly when About was clicked. Nothing in this app positions that window — it is the system panel — so there is nothing to fix. Worth knowing only because this log is the app's whole diagnostic surface, and an unexplained warning in it invites a hunt.
 - **Upstream attribution is intentional.** `README.md` credits the original author and notes the project's AI co-authorship. That describes upstream's work, not this fork's, and should not be stripped.

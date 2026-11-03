@@ -6,7 +6,13 @@ Without it, macOS ignores the panel's HID digitizer interface (usage page `0x0D`
 
 > Fork of [ymlaine/TouchscreenDriver](https://github.com/ymlaine/TouchscreenDriver), originally co-authored by [Yves-Marie Lainé](https://github.com/ymlaine) and Claude.
 
-> ⚠️ **This working copy carries local patches not present in the published v1.5.0 release.** Two bugs fixed — the `IOHIDManager` being released on return from `attachDriver()` (driver reported "Active" while receiving no events at all), and `findXeneonDisplayID()` selecting the wrong display when three or more are connected. Per-touch logging is also now off by default behind `LogTouchPoints`. See `CLAUDE.md` → *First hardware bring-up* for the full detail. Installing the published release over this copy reverts all of it.
+> ⚠️ **This copy has diverged substantially from the published v1.5.0 release** and is versioned `1.6.0` to say so. It is build-from-source only; there is no release to install and no updater to install one.
+>
+> Seven bug fixes upstream does not have — two found during hardware bring-up (the `IOHIDManager` released on return from `attachDriver()`, so the driver reported "Active" while receiving nothing; and `findXeneonDisplayID()` picking the wrong display with three or more attached), and five from a later review (an unbalanced `CGDisplayHideCursor` that could strand the cursor, a `NotificationCenter` observer accumulating on every device retry, `pkill -f` able to match unrelated processes, the log sitting world-readable in `/tmp`, and a duplicated panel-matching predicate).
+>
+> Sparkle and the whole release pipeline are **removed**, so the bundle embeds no third-party code. Per-touch logging is off by default behind `LogTouchPoints`. There is an app icon, an About panel, a test suite, and CI that actually runs against this branch.
+>
+> `CLAUDE.md` carries the full detail and the reasoning.
 
 ## What this fork changes
 
@@ -16,7 +22,9 @@ Without it, macOS ignores the panel's HID digitizer interface (usage page `0x0D`
 
 **No sudo.** Installs to `~/Applications` and `~/Library/LaunchAgents` instead of `/usr/local/bin`, which is root-owned. Nothing root-owned to clean up.
 
-**A menu bar icon** (`hand.rays`), so the driver's state is visible instead of log-only. Upstream runs completely invisibly — if it's stuck waiting on a permission or can't find the panel, there's no way to tell without `tail`ing a file in `/tmp`. The icon dims while waiting, goes solid when active, and turns red on failure. Its menu shows the target display and offers redetect / open log / about / quit.
+**A menu bar icon** (`hand.rays`), so the driver's state is visible instead of log-only. Upstream runs completely invisibly — if it's stuck waiting on a permission or can't find the panel, there's no way to tell without `tail`ing its log. The icon dims while waiting, goes solid when active, and turns red on failure. Its menu shows the target display and offers redetect / open log / about / quit.
+
+**The log is not world-readable.** Upstream writes to `/tmp`, which is `1777`, as a `0644` file — readable by any process on the machine, including every touch coordinate when per-touch logging is on. This fork writes to `~/Library/Logs/Touchdown.log`, where the enclosing directories are `0700`.
 
 **Survives failure instead of exiting.** Upstream calls `exit(1)` when the HID open is refused or the panel isn't found — which, under `KeepAlive`, is the same relaunch-loop trap as the permission bug. This fork reports the failure in the menu bar and stays up; a missing panel retries every 3s, so unplugging and replugging the Xeneon just works.
 
@@ -175,6 +183,8 @@ No XCTest and no SwiftPM — the project builds with a bare `swiftc` call, and a
 
 It covers the calibration constants and the coordinate mapping (including the four physically measured corner taps), the banner's box alignment, and the panel name-matching rule.
 
+CI runs the same suite on every push to `main` or `local`, then builds and verifies the bundle: no embedded frameworks, nothing linked via `@rpath`, the icon present, and `minos` pinned at `11.0` rather than tracking the runner's OS.
+
 ## Calibration
 
 The driver is pre-calibrated for the Xeneon Edge touchscreen:
@@ -228,6 +238,8 @@ Display:
 | `install.sh` | Builds, installs to `~/Applications`, registers the LaunchAgent |
 | `uninstall.sh` | Removes app, LaunchAgent, caches, TCC records, legacy layouts |
 | `run_analyzer.sh` | Build and run the HID analyzer (see the Input Monitoring caveat under Troubleshooting) |
+| `.github/workflows/build.yml` | CI: tests, build, bundle verification, shell syntax |
+| `CLAUDE.md` | Working notes: break-glass triage, decisions and the reasoning behind them |
 
 ## Troubleshooting
 

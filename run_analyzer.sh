@@ -1,22 +1,32 @@
 #!/bin/bash
 
-# Script de compilation et exécution pour l'analyseur HID
+# Builds and runs the HID analyzer.
+#
+# This produces a BARE BINARY, not a bundle, so it has no TCC identity of its
+# own: macOS attributes its HID access to the terminal you run it from. That
+# means Input Monitoring has to be granted to Terminal for the analyzer to see
+# anything -- a broad, persistent privilege for a shell to hold. Revoke it
+# when you are done.
+#
+# The driver never needs this. It runs as a signed bundle with its own TCC
+# record, which is the whole reason this fork ships an .app rather than a
+# binary in /usr/local/bin.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "🔨 Compilation de HIDAnalyzer.swift..."
+echo "🔨 Compiling HIDAnalyzer.swift..."
 swiftc HIDAnalyzer.swift -o HIDAnalyzer \
     -framework IOKit \
     -framework CoreFoundation \
     -O
 
-echo "✅ Compilation réussie!"
+echo "✅ Compiled"
 echo ""
-echo "🚀 Lancement de l'analyseur..."
-echo "   (Ctrl+C pour quitter)"
+echo "🚀 Starting the analyzer..."
+echo "   (Ctrl+C to quit)"
 echo ""
 
 ./HIDAnalyzer

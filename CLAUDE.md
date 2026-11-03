@@ -113,6 +113,16 @@ Raw X spanned `160..16242` (insets 0.98% / 0.86% — symmetric). Raw Y spanned `
 
 Four taps produced exactly four clicks, so the 50ms debounce still holds under exclusive capture on 27.
 
+### Cleanup — dead files, the analyzer's TCC trap (2026-11-03)
+
+**Deleted `com.ymlaine.touchscreendriver.plist`.** Upstream's LaunchAgent, pointing at `/usr/local/bin/TouchscreenDriver`. Nothing installed it; `uninstall.sh` only ever removed the *installed* copy under `~/Library/LaunchAgents`. It described the bare-binary layout this fork exists to avoid, since a raw Mach-O gets no TCC record at all.
+
+**Deleted `run_driver.sh`**, and with it a trap. It built the driver as a bare binary, which has no bundle identity, so macOS attributes its privileges to the **terminal** it is launched from — meaning it "worked" only if Terminal itself held Accessibility and Input Monitoring. That is a broad, persistent grant for a shell, and nothing warned about it. Its only real use was watching output live, which `tail -f ~/Library/Logs/Touchdown.log` covers.
+
+The README was actively self-contradictory about this: one section said to grant the permissions to `Touchdown.app` "**not to Terminal, and not to a bare binary**", while Troubleshooting said to grant Input Monitoring to Terminal, and a "Manual" install section walked you through the bare-binary path. All three were upstream leftovers; the first is the correct one.
+
+**`run_analyzer.sh` keeps the same property, deliberately.** `HIDAnalyzer` is only ever run as a bare binary, so reading HID really does require granting Input Monitoring to Terminal. That is now documented in the script's header and in the README rather than left as a surprise, with a note to revoke it afterwards.
+
 ### Tests, and CI that actually runs (2026-11-03)
 
 There were no tests at all, and the CI workflow had never run against this fork's code: it triggered on `push: branches: [main]`, but `main` is pure upstream and every change lives on `local`. It was asserting things about a branch nobody commits to. `local` is now in the trigger list, and `./run_tests.sh` runs ahead of the build.
@@ -141,7 +151,7 @@ Deriving the latter two means a build always identifies itself, which is what ac
 
 **The version namespace now overlaps upstream's.** If they ever ship a `1.6.0`, it will not be this one. That is tolerable only because nothing compares versions mechanically any more: no appcast, no updater. The build number and commit are the real identifiers.
 
-A trap this closed: the startup banner had `v1.5.0` written into the ASCII box as a literal, independent of `version.sh`. Bumping the version would have desynced the banner from the Info.plist silently. The banner now reads `CFBundleShortVersionString` from the bundle and pads it to the box's 11-column field, falling back to `dev` for `run_driver.sh`, which runs the binary unbundled with no Info.plist to read. Alignment was checked for 3-, 5- and 7-character versions.
+A trap this closed: the startup banner had `v1.5.0` written into the ASCII box as a literal, independent of `version.sh`. Bumping the version would have desynced the banner from the Info.plist silently. The banner now reads `CFBundleShortVersionString` from the bundle and pads it to the box's 11-column field, falling back to `dev` when there is no Info.plist to read. Alignment is asserted by the test suite.
 
 ### Code review — five fixes (2026-11-03)
 
@@ -232,6 +242,16 @@ Getting there required fixing two real bugs — see *First hardware bring-up* be
 - Ad-hoc means **every rebuild revokes both permissions**. Budget a re-grant *and* a driver restart per rebuild. An Apple Development certificate would remove this cost entirely; none is installed here. Stale `SU*` keys may linger in the preference domain from older builds; they are inert, and `uninstall.sh` clears them.
 
 ### Second machine
+
+> **It is well behind as of 2026-11-03** and nothing in this section's "same build" claim holds until it is updated. It is missing the app icon, the About panel, the Sparkle removal, the five code-review fixes, the log move, the test suite and 1.6.0 — it is still on 1.5.0-era source. Nothing here can check it remotely; `TDSourceCommit` in its *About Touchdown* is the fastest way to see where it actually is.
+>
+> To bring it up to date:
+>
+> ```bash
+> cd ~/Projects/touchdown && git pull && ./install.sh
+> ```
+>
+> Then expect three things: both permissions need re-granting (new `cdhash`), its `/tmp/touchdown.log` is deleted and logging moves to `~/Library/Logs/Touchdown.log`, and the version jumps 1.5.0 → 1.6.0. If that machine is still on macOS 26, the `minos` pin means the build will run there — but check, because an unpinned build would not have.
 
 A second Mac (same Apple Silicon architecture, same panel) runs the same patched build. It was deployed by copying **source**, not the `.app` bundle, and building there with `./install.sh`.
 
@@ -419,7 +439,7 @@ The LaunchAgent uses `KeepAlive { SuccessfulExit = false }`, so any non-zero exi
 ## Known rough edges
 
 - **Display naming varies by unit.** This file used to state flatly that the panel reports as `Type-C`, so the name match in `setupScreen()` always fails and selection is by elimination. On the unit tested 2026-08-21 it reports **`XENEON EDGE`** and the name match succeeds. Treat `Type-C` as one possible name rather than the rule — and note that the disagreement between name-matching and elimination is exactly what produced the display bug documented above.
-- **Comments are still French.** Upstream is French throughout; user-facing strings were translated but ~109 comment lines were not, to keep the diff against upstream reviewable. Translating them is mechanical if desired.
+- **Comments are English as of 2026-11-03.** They were French — upstream is French throughout — and kept that way to keep the diff against upstream reviewable. That rationale expired: `local` has diverged structurally, and the upstream-facing branches (`fix-hid-lifetime-and-display-selection`, `pin-deployment-target`) carry their own French comments untouched, so nothing upstream would receive is affected. If you cherry-pick between `local` and those branches, expect comment-only conflicts.
 - **Swift 6 language mode is not enabled.** `swiftc` defaults to Swift 5 mode, which is why the mutable globals mutated from the C HID callback compile without concurrency errors. Do not add `-swift-version 6` expecting a no-op.
 - **`touchscreenMaxX/Y` are verified** as of 2026-08-21 — `16383` / `9599` are correct on this unit. See the calibration table above for the method and the raw numbers.
 - **A build's minimum OS was the build host's — now pinned.** `build.sh` passes `-target $(uname -m)-apple-macos11.0` as of 2026-11-03, so `LC_BUILD_VERSION` matches the `LSMinimumSystemVersion 11.0` in `Info.plist`. Without it `swiftc` stamps the host's version, and the macOS 27 upgrade turned that from theory into a live hazard: the first rebuild here produced `minos 27.2`, which would have refused to launch on the second machine had it still been on 26. To a user on an older OS that looks like "installs cleanly, then does nothing", with nothing in the log. The **published release is still affected**, depending on the maintainer's build host — the pin lives only on this fork. 11.0 used to be forced by the vendored Sparkle, which was itself `minos 11.0`; with Sparkle gone the only constraint left is the `LSMinimumSystemVersion` in `Info.plist`, so keep the two in step if you ever raise it. CI asserts the pin; verify by hand with `vtool -show-build <binary>`.

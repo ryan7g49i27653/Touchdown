@@ -5,13 +5,13 @@ import IOKit
 import IOKit.hid
 
 // ============================================
-// Configuration pour Corsair Xeneon Edge
+// Configuration for the Corsair Xeneon Edge
 // ============================================
 let TOUCHSCREEN_VENDOR_ID: Int = 0x27c0
 let TOUCHSCREEN_PRODUCT_ID: Int = 0x0859
 
 // ============================================
-// Variables globales pour stocker l'état
+// Globals holding the current state
 // ============================================
 var lastX: Int = 0
 var lastY: Int = 0
@@ -19,7 +19,7 @@ var isTouching: Bool = false
 var reportCount: Int = 0
 
 // ============================================
-// Callback appelé pour chaque valeur HID reçue
+// Called for every HID value received
 // ============================================
 func hidInputCallback(context: UnsafeMutableRawPointer?,
                       result: IOReturn,
@@ -33,9 +33,9 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
     let logicalMin = IOHIDElementGetLogicalMin(element)
     let logicalMax = IOHIDElementGetLogicalMax(element)
     
-    // Filtrer pour n'afficher que les données intéressantes
-    // Usage Page 0x0D = Digitizer (écrans tactiles)
-    // Usage Page 0x01 = Generic Desktop (souris, coordonnées)
+    // Show only the interesting data.
+    // Usage Page 0x0D = Digitizer (touchscreens)
+    // Usage Page 0x01 = Generic Desktop (mice, coordinates)
     
     let usagePageName: String
     let usageName: String
@@ -77,7 +77,7 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
         usageName = "Usage 0x\(String(usage, radix: 16))"
     }
     
-    // Détecter le toucher via Tip Switch
+    // Detect the touch via Tip Switch
     if usagePage == 0x0D && usage == 0x42 {
         let wasTouching = isTouching
         isTouching = intValue != 0
@@ -93,7 +93,7 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
         }
     }
     
-    // Afficher toutes les valeurs non-nulles ou les coordonnées
+    // Print any non-zero value, and the coordinates
     let isCoordinate = (usagePage == 0x01 && (usage == 0x30 || usage == 0x31))
     let isTipSwitch = (usagePage == 0x0D && usage == 0x42)
     
@@ -104,7 +104,7 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
 }
 
 // ============================================
-// Callback appelé pour chaque rapport HID brut
+// Called for every raw HID report
 // ============================================
 func hidReportCallback(context: UnsafeMutableRawPointer?,
                        result: IOReturn,
@@ -114,7 +114,7 @@ func hidReportCallback(context: UnsafeMutableRawPointer?,
                        report: UnsafeMutablePointer<UInt8>,
                        reportLength: CFIndex) {
     
-    // Afficher le rapport brut en hexadécimal
+    // Print the raw report as hex
     var hexString = ""
     for i in 0..<reportLength {
         hexString += String(format: "%02X ", report[i])
@@ -123,7 +123,7 @@ func hidReportCallback(context: UnsafeMutableRawPointer?,
 }
 
 // ============================================
-// Fonction principale
+// Main
 // ============================================
 func main() {
     print("""
@@ -137,10 +137,10 @@ func main() {
     
     """)
     
-    // Créer le HID Manager
+    // Create the HID manager
     let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     
-    // Configurer le filtre pour notre écran tactile
+    // Match only our touchscreen
     let deviceMatch: [String: Any] = [
         kIOHIDVendorIDKey as String: TOUCHSCREEN_VENDOR_ID,
         kIOHIDProductIDKey as String: TOUCHSCREEN_PRODUCT_ID
@@ -148,7 +148,7 @@ func main() {
     
     IOHIDManagerSetDeviceMatching(manager, deviceMatch as CFDictionary)
     
-    // Ouvrir le manager
+    // Open the manager
     let openResult = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
     if openResult != kIOReturnSuccess {
         print("❌ Erreur: Impossible d'ouvrir IOHIDManager (code: \(openResult))")
@@ -157,7 +157,7 @@ func main() {
         exit(1)
     }
     
-    // Vérifier qu'on a trouvé le périphérique
+    // Confirm the device was found
     guard let deviceSet = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>, !deviceSet.isEmpty else {
         print("❌ Erreur: Écran tactile non trouvé!")
         print("   VendorID attendu: 0x\(String(TOUCHSCREEN_VENDOR_ID, radix: 16))")
@@ -167,7 +167,7 @@ func main() {
     
     print("✅ Écran tactile trouvé! (\(deviceSet.count) périphérique(s))")
     
-    // Afficher les infos du périphérique
+    // Print the device info
     for device in deviceSet {
         if let manufacturer = IOHIDDeviceGetProperty(device, kIOHIDManufacturerKey as CFString) {
             print("   Fabricant: \(manufacturer)")
@@ -178,11 +178,11 @@ func main() {
     }
     print("")
     
-    // Enregistrer le callback pour les valeurs parsées
+    // Register the parsed-value callback
     IOHIDManagerRegisterInputValueCallback(manager, hidInputCallback, nil)
     
-    // Optionnel: enregistrer aussi le callback pour les rapports bruts
-    // (décommenter si tu veux voir les bytes bruts)
+    // Optional: also register the raw-report callback
+    // (uncomment to see the raw bytes)
     // IOHIDManagerRegisterInputReportCallback(manager, hidReportCallback, nil)
     
     // Planifier sur le RunLoop principal
@@ -195,7 +195,7 @@ func main() {
     CFRunLoopRun()
 }
 
-// Désactiver le buffering pour voir la sortie en temps réel
+// Unbuffered, so output appears as it happens
 setbuf(stdout, nil)
 
 // Lancer le programme

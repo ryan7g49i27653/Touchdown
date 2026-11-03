@@ -1,6 +1,6 @@
-// Pas de hashbang: ce fichier n'est plus exécutable seul. Le point d'entrée
-// est dans main.swift (driver) ou tests/main.swift (tests), et Swift réserve
-// le hashbang au fichier principal du module.
+// No hashbang: this file is no longer runnable on its own. The entry point
+// lives in main.swift (driver) or tests/main.swift (tests), and Swift reserves
+// the hashbang for the module's main file.
 
 import Foundation
 import IOKit
@@ -9,20 +9,20 @@ import CoreGraphics
 import AppKit
 
 // ============================================
-// Configuration pour Corsair Xeneon Edge
-// À AJUSTER après analyse des rapports HID
+// Configuration for the Corsair Xeneon Edge
+// ADJUST after analysing the HID reports
 // ============================================
 let TOUCHSCREEN_VENDOR_ID: Int = 0x27c0
 let TOUCHSCREEN_PRODUCT_ID: Int = 0x0859
 
-// Plages de coordonnées du touchscreen (calibrées via HIDAnalyzer)
+// Touchscreen coordinate ranges (calibrated with HIDAnalyzer)
 var touchscreenMaxX: CGFloat = 16383
 var touchscreenMaxY: CGFloat = 9599
 var touchscreenMinX: CGFloat = 0
 var touchscreenMinY: CGFloat = 0
 
 // ============================================
-// Configuration écran cible
+// Target display configuration
 // ============================================
 var targetScreen: NSScreen?
 var screenOffsetX: CGFloat = 0
@@ -31,7 +31,7 @@ var screenWidth: CGFloat = 2560
 var screenHeight: CGFloat = 720
 
 // ============================================
-// État du toucher
+// Touch state
 // ============================================
 var currentX: CGFloat = 0
 var currentY: CGFloat = 0
@@ -39,16 +39,17 @@ var isTouching: Bool = false
 var lastClickTime: Date = Date.distantPast
 let debounceInterval: TimeInterval = 0.05 // 50ms debounce
 
-// Journalisation des points de contact. Coupée par défaut: elle écrit une
-// ligne par toucher dans /tmp, sans rotation ni purge, ce qui finit par
-// constituer une trace détaillée de l'usage de l'écran. Réactivable sans
-// recompiler — un rebuild ad-hoc révoquant les autorisations TCC:
+// Per-touch logging. Off by default: it writes a line per touch with no
+// rotation and no purge, which accumulates into a detailed record of how the
+// screen is used. Toggled at runtime rather than compile time because an
+// ad-hoc rebuild revokes both TCC grants, and debugging calibration should
+// not cost that:
 //   defaults write com.bencolson.touchdown LogTouchPoints -bool true
-// puis relancer le driver.
+// then restart the driver.
 let logTouchPoints = UserDefaults.standard.bool(forKey: "LogTouchPoints")
 
 // ============================================
-// Mode de fonctionnement
+// Click mode
 // ============================================
 enum ClickMode {
     case moveCursorAndClick  // Téléporte le curseur puis clique
@@ -57,7 +58,7 @@ enum ClickMode {
 var clickMode: ClickMode = .moveCursorAndClick
 
 // ============================================
-// Mode de capture HID
+// HID capture mode
 // ============================================
 enum CaptureMode {
     case shared      // Écoute les événements sans les bloquer (peut causer des doubles clics)
@@ -66,13 +67,13 @@ enum CaptureMode {
 var captureMode: CaptureMode = .exclusive
 
 // ============================================
-// Fonctions utilitaires
+// Helpers
 // ============================================
 
-// Largeur du champ version dans la bannière ASCII, jusqu'au bord du cadre.
-// Isolé pour que les tests vérifient l'alignement sans lancer le driver: la
-// bannière lit maintenant la version depuis l'Info.plist, donc sa longueur
-// varie et un cadre désaligné passerait inaperçu.
+// Width of the version field in the ASCII banner, out to the frame edge.
+// Pulled out so the tests can check alignment without launching the driver:
+// the banner now reads its version from the Info.plist, so the string length
+// varies and a misaligned frame would otherwise go unnoticed.
 let bannerVersionFieldWidth = 11
 
 func bannerVersionField(_ version: String) -> String {
@@ -80,11 +81,11 @@ func bannerVersionField(_ version: String) -> String {
 }
 
 func convertToScreenCoordinates(rawX: Int, rawY: Int) -> CGPoint {
-    // Normaliser les coordonnées brutes en 0.0 - 1.0
+    // Normalise the raw coordinates to 0.0 - 1.0
     let normalizedX = (CGFloat(rawX) - touchscreenMinX) / (touchscreenMaxX - touchscreenMinX)
     let normalizedY = (CGFloat(rawY) - touchscreenMinY) / (touchscreenMaxY - touchscreenMinY)
     
-    // Convertir en coordonnées écran
+    // Convert to screen coordinates
     let screenX = screenOffsetX + (normalizedX * screenWidth)
     let screenY = screenOffsetY + (normalizedY * screenHeight)
     
@@ -92,23 +93,23 @@ func convertToScreenCoordinates(rawX: Int, rawY: Int) -> CGPoint {
 }
 
 func injectClick(at point: CGPoint) {
-    // Vérifier le debounce
+    // Debounce
     let now = Date()
     guard now.timeIntervalSince(lastClickTime) > debounceInterval else { return }
     lastClickTime = now
 
-    // Sauvegarder la position actuelle du curseur
+    // Save the cursor's current position
     let originalPosition = NSEvent.mouseLocation
-    // Convertir de NSScreen (origine bas-gauche) vers CG (origine haut-gauche)
+    // NSScreen's origin is bottom-left, CGEvent's is top-left
     let mainScreenHeight = NSScreen.screens[0].frame.height
     let originalCGPosition = CGPoint(x: originalPosition.x, y: mainScreenHeight - originalPosition.y)
 
-    // CGDisplayHideCursor/ShowCursor sont comptés: chaque hide sans show
-    // incrémente définitivement le compteur et le curseur ne revient plus
-    // jusqu'au redémarrage du driver. Les deux `guard` plus bas sortaient de
-    // la fonction entre le hide et le show, donc un échec de création d'un
-    // CGEvent — rare, mais possible sous pression mémoire — faisait disparaître
-    // le curseur pour de bon. Le defer garantit la paire.
+    // CGDisplayHideCursor/ShowCursor are reference counted: every hide without
+    // a matching show raises the count permanently, and the cursor never comes
+    // back until the driver restarts. The two `guard`s below used to return
+    // between the hide and the show, so a failed CGEvent allocation -- rare,
+    // but possible under memory pressure -- lost the cursor for good. The
+    // defer guarantees the pair.
     var cursorHidden = false
     defer {
         if cursorHidden {
@@ -120,21 +121,21 @@ func injectClick(at point: CGPoint) {
 
     switch clickMode {
     case .moveCursorAndClick:
-        // Cacher le curseur pour éviter le curseur fantôme
+        // Hide the cursor so it does not ghost at the old position
         CGDisplayHideCursor(CGMainDisplayID())
         cursorHidden = true
 
-        // Téléporter le curseur
+        // Warp the cursor
         CGWarpMouseCursorPosition(point)
 
-        // Petit délai pour que le système enregistre la position
+        // Brief pause so the system registers the new position
         usleep(10000) // 10ms
 
     case .clickInPlace:
-        break // Ne pas bouger le curseur
+        break // Leave the cursor alone
     }
 
-    // Créer et poster les événements souris
+    // Build and post the mouse events
     guard let mouseDown = CGEvent(mouseEventSource: nil,
                                    mouseType: .leftMouseDown,
                                    mouseCursorPosition: point,
@@ -151,7 +152,7 @@ func injectClick(at point: CGPoint) {
         return
     }
 
-    // Poster les événements
+    // Post them
     mouseDown.post(tap: .cghidEventTap)
     usleep(20000) // 20ms entre down et up
     mouseUp.post(tap: .cghidEventTap)
@@ -185,7 +186,7 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
                       sender: UnsafeMutableRawPointer?,
                       value: IOHIDValue) {
 
-    // Toujours mettre à jour la géométrie de l'écran (NSScreen peut changer à tout moment)
+    // Always refresh the screen geometry (NSScreen can change at any moment)
     updateScreenFromCurrentList()
 
     let element = IOHIDValueGetElement(value)
@@ -193,7 +194,7 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
     let usage = IOHIDElementGetUsage(element)
     let intValue = IOHIDValueGetIntegerValue(value)
     
-    // Mettre à jour les coordonnées
+    // Update the coordinates
     if usagePage == 0x01 { // Generic Desktop
         switch usage {
         case 0x30: // X
@@ -205,8 +206,9 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
         }
     }
     
-    // Détecter le toucher (Tip Switch OU Button 1)
-    // Le Xeneon Edge utilise Button 1 (usagePage 0x09, usage 0x01) au lieu de Tip Switch
+    // Detect the touch (Tip Switch OR Button 1).
+    // The Xeneon Edge reports Button 1 (usagePage 0x09, usage 0x01) rather
+    // than a Tip Switch.
     let isTouchEvent = (usagePage == 0x0D && usage == 0x42) || (usagePage == 0x09 && usage == 0x01)
 
     if isTouchEvent {
@@ -214,27 +216,27 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
         isTouching = intValue != 0
 
         if isTouching && !wasTouching {
-            // Nouveau toucher → clic
+            // New touch -> click
             let screenPoint = convertToScreenCoordinates(rawX: Int(currentX), rawY: Int(currentY))
             injectClick(at: screenPoint)
         } else if isTouching && wasTouching {
-            // Glissement → drag
+            // Still touching -> drag
             let screenPoint = convertToScreenCoordinates(rawX: Int(currentX), rawY: Int(currentY))
             injectDrag(to: screenPoint)
         }
-        // Si relâché, on ne fait rien (le mouseUp a déjà été envoyé)
+        // On release there is nothing to do: mouseUp was already sent
     }
 }
 
 // ============================================
-// Configuration de l'écran
+// Screen configuration
 // ============================================
 
-// Comment un écran est reconnu comme étant le panneau. Un seul endroit:
-// setupScreen() et checkForGeometryChanges() en avaient chacun leur copie, et
-// deux prédicats indépendants qui divergent sont exactement ce qui a produit
-// le bug d'écran d'août — le nom gagnait au démarrage, l'élimination gagnait
-// ensuite à chaque événement HID.
+// How a screen is recognised as the panel. One place only: setupScreen() and
+// checkForGeometryChanges() each used to carry their own copy, and two
+// independent predicates that can disagree is exactly what produced the
+// display bug in August -- the name match won at startup, elimination won on
+// every HID event afterwards.
 enum ScreenMatch {
     case byName(NSScreen)
     case bySecondaryFallback(NSScreen)
@@ -247,9 +249,9 @@ enum ScreenMatch {
     }
 }
 
-// Le test de nom, isolé pour être vérifiable sans écran branché. Attention:
-// certaines unités s'annoncent « Type-C » et ne correspondent donc à rien ici
-// — c'est voulu, le repli par élimination les rattrape. Voir les tests.
+// The name test, isolated so it is checkable with no panel attached. Note
+// that some units report as "Type-C" and therefore match nothing here -- that
+// is intended, the elimination fallback catches them. See the tests.
 func isXeneonName(_ name: String) -> Bool {
     name.contains("XENEON") || name.contains("Corsair")
 }
@@ -260,7 +262,7 @@ func locateXeneonScreen() -> ScreenMatch? {
     if let named = screens.first(where: { isXeneonName($0.localizedName) }) {
         return .byName(named)
     }
-    // Repli: le deuxième écran, souvent l'externe.
+    // Fallback: the second screen, usually the external one.
     if screens.count > 1 {
         return .bySecondaryFallback(screens[1])
     }
@@ -298,17 +300,17 @@ func setupScreen() {
 var xeneonDisplayID: CGDirectDisplayID = 0
 
 func findXeneonDisplayID() {
-    // setupScreen() a déjà retenu le bon écran, par nom quand c'est possible.
-    // On en dérive directement le CGDirectDisplayID: « le premier écran qui
-    // n'est pas le principal » se trompe dès qu'il y en a trois, et écrase
-    // ensuite la bonne géométrie à chaque événement HID.
+    // setupScreen() has already picked the right screen, by name where it can.
+    // Derive the CGDirectDisplayID straight from it: "the first screen that is
+    // not the main one" gets it wrong as soon as there are three, and then
+    // overwrites the correct geometry on every HID event.
     if let screen = targetScreen,
        let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
         xeneonDisplayID = id
         return
     }
 
-    // Repli: le premier écran qui n'est pas le principal.
+    // Fallback: the first screen that is not the main one.
     var displayCount: UInt32 = 0
     CGGetActiveDisplayList(0, nil, &displayCount)
 
@@ -326,10 +328,10 @@ func findXeneonDisplayID() {
 func updateScreenFromCurrentList() {
     guard xeneonDisplayID != 0 else { return }
 
-    // Utiliser CGDisplayBounds qui se met à jour en temps réel (contrairement à NSScreen.screens)
+    // CGDisplayBounds updates in real time, unlike NSScreen.screens
     let bounds = CGDisplayBounds(xeneonDisplayID)
 
-    // CGDisplayBounds utilise le système de coordonnées avec origine en haut à gauche
+    // CGDisplayBounds uses a top-left origin
     screenOffsetX = bounds.origin.x
     screenOffsetY = bounds.origin.y
     screenWidth = bounds.width
@@ -341,16 +343,15 @@ func updateScreenGeometry() {
         let frame = screen.frame
         let scaleFactor = screen.backingScaleFactor
 
-        // NSScreen utilise l'origine en bas à gauche, mais CGEvent utilise l'origine en haut à gauche
-        // On doit convertir les coordonnées Y
+        // NSScreen's origin is bottom-left, CGEvent's is top-left, so Y has
+        // to be converted
         let mainScreenHeight = NSScreen.screens[0].frame.height
 
         screenOffsetX = frame.origin.x
-        // Convertir Y: cgY = mainHeight - nsY - screenHeight
+        // cgY = mainHeight - nsY - screenHeight
         screenOffsetY = mainScreenHeight - frame.origin.y - frame.height
 
-        // CGEvent utilise les coordonnées en points logiques
-        // frame.size donne déjà la taille logique, c'est ce qu'on veut
+        // CGEvent works in logical points, and frame.size is already logical
         screenWidth = frame.width
         screenHeight = frame.height
 
@@ -362,10 +363,10 @@ func updateScreenGeometry() {
 }
 
 // ============================================
-// Observer pour les changements d'écran
+// Screen-change observer
 // ============================================
 
-// Sauvegarde de la dernière géométrie connue pour détecter les changements
+// Last known geometry, kept so changes can be detected
 var lastKnownScreenOriginX: CGFloat = 0
 var lastKnownScreenOriginY: CGFloat = 0
 var lastKnownScreenWidth: CGFloat = 0
@@ -376,12 +377,12 @@ class ScreenChangeObserver {
     private var observerToken: NSObjectProtocol?
 
     init() {
-        // addObserver(forName:object:queue:using:) renvoie un jeton que
-        // NotificationCenter retient jusqu'à removeObserver. Le jeter laissait
-        // l'observation survivre à l'objet: attachDriver() recréant un
-        // observer à chaque réessai de périphérique (toutes les 3s), un simple
-        // changement d'écran finissait par rejouer setupScreen() des centaines
-        // de fois et noyer le journal.
+        // addObserver(forName:object:queue:using:) returns a token that
+        // NotificationCenter retains until removeObserver. Discarding it left
+        // the observation outliving the object: attachDriver() built a fresh
+        // observer on every device retry (each 3s), so a single display change
+        // ended up replaying setupScreen() hundreds of times and drowning the
+        // log.
         observerToken = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -393,7 +394,7 @@ class ScreenChangeObserver {
             saveCurrentGeometry()
         }
 
-        // Timer GCD pour vérifier les changements de position
+        // GCD timer that watches for position changes
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
         timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
         timer.setEventHandler {
@@ -421,7 +422,7 @@ func saveCurrentGeometry() {
 }
 
 func checkForGeometryChanges() {
-    // Même règle de sélection qu'au démarrage, via locateXeneonScreen().
+    // Same selection rule as at startup, via locateXeneonScreen().
     guard let currentXeneon = locateXeneonScreen()?.screen else {
         return
     }
@@ -436,7 +437,7 @@ func checkForGeometryChanges() {
         print("   Before: (\(Int(lastKnownScreenOriginX)), \(Int(lastKnownScreenOriginY))) \(Int(lastKnownScreenWidth))x\(Int(lastKnownScreenHeight))")
         print("   After: (\(Int(frame.origin.x)), \(Int(frame.origin.y))) \(Int(frame.width))x\(Int(frame.height))")
 
-        // Mettre à jour la référence à l'écran
+        // Update the screen reference
         targetScreen = currentXeneon
         findXeneonDisplayID()
         updateScreenGeometry()
@@ -447,7 +448,7 @@ func checkForGeometryChanges() {
 var screenObserver: ScreenChangeObserver?
 
 // ============================================
-// Vérification des permissions
+// Permission checks
 // ============================================
 
 func checkAccessibilityPermission() -> Bool {
@@ -456,19 +457,19 @@ func checkAccessibilityPermission() -> Bool {
 }
 
 // ============================================
-// Icône de la barre de menus
+// Menu bar icon
 // ============================================
 
-// ~/Library/Logs plutôt que /tmp: /tmp est en 1777 et le journal y était en
-// 0644, donc lisible par n'importe quel processus de la machine — noms et
-// géométrie des écrans, et les coordonnées de chaque toucher quand
-// LogTouchPoints est actif. ~/Library et ~/Library/Logs sont en 0700, ce qui
-// protège le fichier par le répertoire quels que soient ses propres droits.
-// Doit rester synchronisé avec StandardOutPath/StandardErrorPath du plist.
+// ~/Library/Logs rather than /tmp: /tmp is 1777 and the log was 0644 there,
+// so any process on the machine could read it -- display names and geometry,
+// and every touch coordinate while LogTouchPoints is on. ~/Library and
+// ~/Library/Logs are both 0700, so the directory protects the file whatever
+// its own mode is.
+// Must stay in step with StandardOutPath/StandardErrorPath in the plist.
 let logPath = (NSHomeDirectory() as NSString)
     .appendingPathComponent("Library/Logs/Touchdown.log")
 
-// NSObject: les NSMenuItem ont besoin d'une cible Objective-C pour leurs actions.
+// NSObject: NSMenuItem needs an Objective-C target for its actions.
 final class StatusController: NSObject {
     static let shared = StatusController()
 
@@ -483,13 +484,12 @@ final class StatusController: NSObject {
     private let stateItem = NSMenuItem(title: "…", action: nil, keyEquivalent: "")
     private let displayItem = NSMenuItem(title: "…", action: nil, keyEquivalent: "")
 
-    // Pas de mise à jour automatique: ce fork ne publie rien. Sparkle a été
-    // entièrement retiré — plus de framework embarqué, plus de flux, plus
-    // d'entrée « Check for Updates… » dans le menu. Mettre à jour, ici, c'est
-    // relancer ./install.sh.
+    // No auto-update: this fork publishes nothing. Sparkle was removed
+    // outright -- no embedded framework, no feed, no "Check for Updates..."
+    // menu entry. Updating here means running ./install.sh again.
 
-    // À appeler sur le thread principal avant NSApplication.run(), pour que
-    // l'état « en attente de permission » soit déjà visible.
+    // Call on the main thread before NSApplication.run(), so the
+    // "waiting for permission" state is visible straight away.
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -540,7 +540,7 @@ final class StatusController: NSObject {
     }
 
     func setState(_ state: State) {
-        // Toute mutation d'AppKit doit se faire sur le thread principal.
+        // Every AppKit mutation has to happen on the main thread.
         guard Thread.isMainThread else {
             DispatchQueue.main.async { self.setState(state) }
             return
@@ -590,8 +590,8 @@ final class StatusController: NSObject {
     }
 
     @objc private func showAbout() {
-        // .accessory ne passe pas au premier plan tout seul: sans ça, le
-        // panneau s'ouvre derrière les autres applications.
+        // An .accessory app does not come forward by itself: without this the
+        // panel opens behind whatever is frontmost.
         if #available(macOS 14.0, *) {
             NSApp.activate()
         } else {
@@ -617,22 +617,21 @@ final class StatusController: NSObject {
 
         var options: [NSApplication.AboutPanelOptionKey: Any] = [.credits: credits]
 
-        // Le panneau affiche « Version <CFBundleShortVersionString>
-        // (<CFBundleVersion>) ». On enrichit la parenthèse avec le commit
-        // d'origine, que build.sh grave dans TDSourceCommit: avec deux
-        // machines et des builds ad-hoc, « laquelle tourne quoi » ne se
-        // répond pas autrement.
+        // The panel shows "Version <CFBundleShortVersionString>
+        // (<CFBundleVersion>)". Enrich the parenthesised part with the source
+        // commit that build.sh stamps into TDSourceCommit: with two machines
+        // and ad-hoc builds, "which one is running what" has no other answer.
         let info = Bundle.main.infoDictionary
         if let build = info?["CFBundleVersion"] as? String,
            let commit = info?["TDSourceCommit"] as? String {
             options[.version] = "\(build) · \(commit)"
         }
 
-        // Le panneau prend sinon NSApp.applicationIconImage, qui reste
-        // générique tant que LaunchServices n'a pas indexé le bundle — cas
-        // courant juste après une installation. On charge donc l'icône
-        // directement depuis Resources. Le nom vient de l'Info.plist pour
-        // rester aligné sur ce que build.sh y écrit.
+        // Otherwise the panel takes NSApp.applicationIconImage, which stays
+        // generic until LaunchServices has indexed the bundle -- common right
+        // after an install. So load the icon straight out of Resources. The
+        // name comes from the Info.plist to stay aligned with what build.sh
+        // writes there.
         let iconName = Bundle.main.infoDictionary?["CFBundleIconFile"] as? String ?? "Touchdown"
         if let url = Bundle.main.url(forResource: iconName, withExtension: "icns"),
            let icon = NSImage(contentsOf: url) {
@@ -643,33 +642,33 @@ final class StatusController: NSObject {
     }
 
     @objc private func quitDriver() {
-        // exit(0): avec KeepAlive { SuccessfulExit = false }, launchd ne
-        // relance pas après une sortie propre.
+        // exit(0): with KeepAlive { SuccessfulExit = false }, launchd does
+        // not relaunch after a clean exit.
         exit(0)
     }
 }
 
 // ============================================
-// Programme principal
+// Main program
 // ============================================
 
-// Référence forte sur le manager HID. attachDriver() rend la main avant que
-// NSApplication.run() ne serve la runloop: sans ce global, ARC libère le
-// manager au retour, la source runloop disparaît avec lui et plus aucun
-// événement n'arrive — alors que l'ouverture et la saisie ont réussi, donc
-// le driver s'annonce « actif » sans rien capter.
+// Strong reference to the HID manager. attachDriver() returns before
+// NSApplication.run() starts servicing the run loop: without this global, ARC
+// releases the manager on return, its run loop source goes with it and no
+// event ever arrives -- while the open and the seize both succeeded, so the
+// driver advertises itself as "active" while capturing nothing.
 var hidManager: IOHIDManager?
 
-// Attache le HID et démarre la capture. Doit tourner sur le thread principal:
-// le callback est planifié sur CFRunLoopGetMain(), servi par NSApplication.run().
+// Attaches the HID and starts capture. Must run on the main thread: the
+// callback is scheduled on CFRunLoopGetMain(), serviced by NSApplication.run().
 func attachDriver() {
-    // Configurer l'écran cible
+    // Set up the target screen
     setupScreen()
     findXeneonDisplayID()
     saveCurrentGeometry()
 
-    // Une seule fois. attachDriver() est rappelé toutes les 3s tant que le
-    // panneau est absent, et chaque appel installait un observer de plus.
+    // Once only. attachDriver() is re-entered every 3s while the panel is
+    // missing, and each call used to install another observer.
     if screenObserver == nil {
         screenObserver = ScreenChangeObserver()
     }
@@ -686,11 +685,11 @@ func attachDriver() {
 
     """)
 
-    // Créer le HID Manager
+    // Create the HID manager
     let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     hidManager = manager
 
-    // Filtrer pour notre écran tactile
+    // Match only our touchscreen
     let deviceMatch: [String: Any] = [
         kIOHIDVendorIDKey as String: TOUCHSCREEN_VENDOR_ID,
         kIOHIDProductIDKey as String: TOUCHSCREEN_PRODUCT_ID
@@ -698,8 +697,8 @@ func attachDriver() {
 
     IOHIDManagerSetDeviceMatching(manager, deviceMatch as CFDictionary)
 
-    // Ouvrir le manager avec le mode approprié
-    // kIOHIDOptionsTypeSeizeDevice = 0x01 - prend le contrôle exclusif du périphérique
+    // Open the manager in the appropriate mode.
+    // kIOHIDOptionsTypeSeizeDevice = 0x01 - takes exclusive control
     let openOptions: IOOptionBits
     if captureMode == .exclusive {
         openOptions = IOOptionBits(kIOHIDOptionsTypeSeizeDevice)
@@ -724,14 +723,14 @@ func attachDriver() {
 
             """)
         }
-        // Rester en vie et signaler dans la barre de menus. Un exit() ici
-        // déclencherait la boucle de relance de launchd.
+        // Stay alive and report in the menu bar. An exit() here would trip
+        // launchd's relaunch loop.
         StatusController.shared.setState(.failed("HID open refused"))
         return
     }
 
-    // Vérifier le périphérique. Absent = probablement débranché, donc on
-    // réessaie au lieu de sortir: le Xeneon peut arriver après le driver.
+    // Check for the device. Absent probably means unplugged, so retry rather
+    // than exit: the Xeneon can show up after the driver does.
     guard let deviceSet = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>, !deviceSet.isEmpty else {
         print("⏳ Touchscreen not found, retrying in 3s...")
         StatusController.shared.setState(.waitingDevice)
@@ -742,7 +741,7 @@ func attachDriver() {
 
     print("✅ Touchscreen connected")
 
-    // Enregistrer le callback
+    // Register the callback
     IOHIDManagerRegisterInputValueCallback(manager, hidInputCallback, nil)
     IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
 
@@ -756,12 +755,12 @@ func attachDriver() {
 }
 
 // ============================================
-// Programme principal
+// Main program
 // ============================================
 
-// install.sh relance le LaunchAgent alors qu'une copie lancée à la main peut
-// encore tourner. Deux instances en mode exclusif se disputeraient le seize
-// HID, donc la plus récente s'efface.
+// install.sh reloads the LaunchAgent while a hand-launched copy may still be
+// running. Two instances in exclusive mode would fight over the HID seize, so
+// the newer one bows out.
 func ensureSingleInstance() {
     guard let bundleID = Bundle.main.bundleIdentifier else { return }
     let me = ProcessInfo.processInfo.processIdentifier
@@ -771,16 +770,16 @@ func ensureSingleInstance() {
 
     let pids = others.map { String($0.processIdentifier) }.joined(separator: ", ")
     print("⚠️  Another instance is already running (pid \(pids)), exiting.")
-    // exit(0): sortie propre, donc KeepAlive { SuccessfulExit = false } ne relance pas.
+    // exit(0): a clean exit, so KeepAlive { SuccessfulExit = false } does not relaunch.
     exit(0)
 }
 
 func main() {
-    // Lu depuis l'Info.plist, pas écrit en dur: la bannière répétait « v1.5.0 »
-    // en littéral alors que version.sh alimentait le plug-in de son côté —
-    // deux sources indépendantes qui divergent au premier changement de
-    // version. 11 = largeur du champ jusqu'au bord du cadre.
-    // « dev » couvre run_driver.sh, qui exécute le binaire hors bundle.
+    // Read from the Info.plist rather than hard-coded: the banner used to
+    // repeat "v1.5.0" as a literal while version.sh fed the plist separately
+    // -- two independent sources that diverge the moment the version changes.
+    // "dev" covers running the binary outside a bundle, where there is no
+    // Info.plist to read.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     let versionField = bannerVersionField(version)
 
@@ -794,11 +793,11 @@ func main() {
 
     ensureSingleInstance()
 
-    // L'icône avant tout le reste: c'est elle qui rend visible l'attente
-    // de permission, sinon l'utilisateur n'a que le journal.
+    // The icon before anything else: it is what makes the wait for permission
+    // visible, otherwise all the user has is the log.
     StatusController.shared.install()
 
-    // Le dialogue de permission doit être demandé depuis le thread principal.
+    // The permission dialog has to be requested from the main thread.
     print("🔐 Checking Accessibility permission...")
     if checkAccessibilityPermission() {
         print("✅ Accessibility permission granted")
@@ -816,10 +815,10 @@ func main() {
         """)
         StatusController.shared.setState(.waitingPermission)
 
-        // Polling silencieux, hors du thread principal pour ne pas figer la
-        // barre de menus. Un seul dialogue a été montré, pas de re-demande.
-        // Et pas d'exit(): sinon KeepAlive relance en boucle et empile les
-        // dialogues système.
+        // Silent polling, off the main thread so the menu bar does not
+        // freeze. One dialog was already shown; do not ask again. And no
+        // exit(), or KeepAlive relaunches in a loop and stacks up system
+        // dialogs.
         DispatchQueue.global(qos: .utility).async {
             while !AXIsProcessTrusted() {
                 Thread.sleep(forTimeInterval: 2.0)
@@ -829,13 +828,13 @@ func main() {
         }
     }
 
-    // NSApplication fournit la boucle d'événements (mode par défaut), donc les
-    // sources CFRunLoop du HID sont servies. .accessory = pas d'icône du Dock.
+    // NSApplication provides the event loop (default mode), so the HID's
+    // CFRunLoop sources get serviced. .accessory = no Dock icon.
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     app.run()
 }
 
-// Le point d'entrée vit dans main.swift: Swift n'autorise le code au niveau
-// racine que dans un fichier de ce nom, et le garder ici interdisait d'ajouter
-// le moindre second fichier au module — donc interdisait les tests.
+// The entry point lives in main.swift: Swift allows top-level code only in a
+// file of that name, and keeping it here made it impossible to add any second
+// file to the module -- which made tests impossible.

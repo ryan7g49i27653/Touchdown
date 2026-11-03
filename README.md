@@ -98,15 +98,6 @@ Or, if you installed from the release and have no clone:
 curl -fsSL https://raw.githubusercontent.com/bencolson/Touchdown/main/uninstall.sh | bash
 ```
 
-### Manual
-
-```bash
-git clone https://github.com/bencolson/Touchdown.git
-cd Touchdown
-chmod +x run_driver.sh run_analyzer.sh
-./run_driver.sh
-```
-
 ### Grant Permissions
 
 Grant both to **`Touchdown.app`** — not to Terminal, and not to a bare binary:
@@ -236,8 +227,7 @@ Display:
 | `build.sh` | Builds and signs `Touchdown.app` into a given directory |
 | `install.sh` | Builds, installs to `~/Applications`, registers the LaunchAgent |
 | `uninstall.sh` | Removes app, LaunchAgent, caches, TCC records, legacy layouts |
-| `run_driver.sh` | Build and run the driver in the foreground, unbundled |
-| `run_analyzer.sh` | Build and run the analyzer |
+| `run_analyzer.sh` | Build and run the HID analyzer (see the Input Monitoring caveat under Troubleshooting) |
 
 ## Troubleshooting
 
@@ -247,14 +237,16 @@ Display:
 - Verify Vendor/Product IDs match
 
 ### "Cannot open IOHIDManager"
-- Grant Input Monitoring permission to Terminal
-- Restart Terminal after granting permissions
+- Grant **Input Monitoring** to `Touchdown.app`, then restart the driver — this is checked only inside `IOHIDManagerOpen()`, and that path does not retry
 - Close other apps using the touchscreen (iCUE, etc.)
 
 ### Clicks at wrong position
-1. Run `./run_analyzer.sh` and touch screen corners
-2. Update touchscreenMaxX/Y values in the code
-3. Rebuild with `./run_driver.sh`
+1. Run `./run_analyzer.sh` and touch the screen corners
+2. Update `touchscreenMaxX/Y` in `TouchscreenDriver.swift`
+3. Update the expected values in `tests/main.swift`, which assert those constants
+4. `./install.sh`, then re-grant both permissions
+
+> `run_analyzer.sh` builds a bare binary, which has no bundle identity of its own, so macOS attributes its HID access to the **terminal** you run it from — meaning Input Monitoring has to be granted to Terminal for the analyzer to see anything. That is a broad, persistent privilege for a shell to hold; revoke it when you are done. The driver itself never needs this, because it runs as a signed bundle with its own TCC record.
 
 ### Exclusive mode fails
 Another app may be using the touchscreen. Either:

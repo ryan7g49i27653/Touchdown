@@ -64,6 +64,6 @@ jobs:
       - name: Shellcheck scripts
         run: |
           for f in build.sh install.sh uninstall.sh version.sh run_tests.sh \
-                   run_driver.sh run_analyzer.sh; do
+                   run_analyzer.sh; do
             bash -n "$f" && echo "OK $f"
           done

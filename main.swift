@@ -1,17 +1,17 @@
-// Point d'entrée du driver.
+// The driver's entry point.
 //
-// Ces deux lignes vivaient à la fin de TouchscreenDriver.swift. Swift
-// n'autorise le code au niveau racine que dans un fichier nommé main.swift:
-// tant qu'elles y étaient, le module ne pouvait contenir aucun autre fichier,
-// et le binaire de test — qui compile les mêmes déclarations avec son propre
-// main — était impossible à produire.
+// These two lines used to sit at the end of TouchscreenDriver.swift. Swift
+// allows top-level code only in a file named main.swift, so while they were
+// there the module could not contain any other file -- which made the test
+// binary, which compiles the same declarations with its own main, impossible
+// to produce.
 //
-// tests/main.swift joue le même rôle pour run_tests.sh. Les deux ne sont
-// jamais compilés ensemble, ce qui est exactement la contrainte voulue.
+// tests/main.swift plays the same role for run_tests.sh. The two are never
+// compiled together, which is exactly the constraint we want.
 
 import Foundation
 
-// Désactiver le buffering pour voir la sortie en temps réel
+// Unbuffered, so output appears in the log as it happens
 setbuf(stdout, nil)
 
 main()

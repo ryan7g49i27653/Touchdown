@@ -63,7 +63,7 @@ cd "$SCRIPT_DIR"
 # uname -m rather than a literal arm64, so an Intel host still builds natively.
 TARGET="$(uname -m)-apple-macos11.0"
 
-swiftc TouchscreenDriver.swift -o "$OUT_DIR/.$APP_NAME.bin" \
+swiftc TouchscreenDriver.swift main.swift -o "$OUT_DIR/.$APP_NAME.bin" \
     -target "$TARGET" \
     -framework IOKit \
     -framework CoreFoundation \

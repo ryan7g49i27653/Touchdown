@@ -1,4 +1,6 @@
-#!/usr/bin/env swift
+// Pas de hashbang: ce fichier n'est plus exécutable seul. Le point d'entrée
+// est dans main.swift (driver) ou tests/main.swift (tests), et Swift réserve
+// le hashbang au fichier principal du module.
 
 import Foundation
 import IOKit
@@ -66,6 +68,16 @@ var captureMode: CaptureMode = .exclusive
 // ============================================
 // Fonctions utilitaires
 // ============================================
+
+// Largeur du champ version dans la bannière ASCII, jusqu'au bord du cadre.
+// Isolé pour que les tests vérifient l'alignement sans lancer le driver: la
+// bannière lit maintenant la version depuis l'Info.plist, donc sa longueur
+// varie et un cadre désaligné passerait inaperçu.
+let bannerVersionFieldWidth = 11
+
+func bannerVersionField(_ version: String) -> String {
+    "v\(version)".padding(toLength: bannerVersionFieldWidth, withPad: " ", startingAt: 0)
+}
 
 func convertToScreenCoordinates(rawX: Int, rawY: Int) -> CGPoint {
     // Normaliser les coordonnées brutes en 0.0 - 1.0
@@ -235,12 +247,17 @@ enum ScreenMatch {
     }
 }
 
+// Le test de nom, isolé pour être vérifiable sans écran branché. Attention:
+// certaines unités s'annoncent « Type-C » et ne correspondent donc à rien ici
+// — c'est voulu, le repli par élimination les rattrape. Voir les tests.
+func isXeneonName(_ name: String) -> Bool {
+    name.contains("XENEON") || name.contains("Corsair")
+}
+
 func locateXeneonScreen() -> ScreenMatch? {
     let screens = NSScreen.screens
 
-    if let named = screens.first(where: {
-        $0.localizedName.contains("XENEON") || $0.localizedName.contains("Corsair")
-    }) {
+    if let named = screens.first(where: { isXeneonName($0.localizedName) }) {
         return .byName(named)
     }
     // Repli: le deuxième écran, souvent l'externe.
@@ -765,7 +782,7 @@ func main() {
     // version. 11 = largeur du champ jusqu'au bord du cadre.
     // « dev » couvre run_driver.sh, qui exécute le binaire hors bundle.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-    let versionField = "v\(version)".padding(toLength: 11, withPad: " ", startingAt: 0)
+    let versionField = bannerVersionField(version)
 
     print("""
     ╔════════════════════════════════════════════════════════════╗
@@ -819,8 +836,6 @@ func main() {
     app.run()
 }
 
-// Désactiver le buffering pour voir la sortie en temps réel
-setbuf(stdout, nil)
-
-// Point d'entrée
-main()
+// Le point d'entrée vit dans main.swift: Swift n'autorise le code au niveau
+// racine que dans un fichier de ce nom, et le garder ici interdisait d'ajouter
+// le moindre second fichier au module — donc interdisait les tests.

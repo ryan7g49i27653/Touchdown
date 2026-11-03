@@ -6,9 +6,13 @@ name: Build
 # identity in CI -- the build here is ad-hoc signed, which is also what
 # build.sh does by default.
 
+# `local` is the fork's working branch and the only one that carries this
+# fork's code; `main` is pure upstream. Without `local` here the workflow
+# never ran against anything that was actually changed, which is how it sat
+# for months asserting things about a branch nobody commits to.
 on:
   push:
-    branches: [main]
+    branches: [main, local]
   pull_request:
   workflow_dispatch:
 
@@ -22,6 +26,11 @@ jobs:
         run: |
           swift --version
           sw_vers
+
+      # Before the build: a compile failure in the driver surfaces here too,
+      # and a mapping regression is worth catching before anything is signed.
+      - name: Tests
+        run: ./run_tests.sh
 
       - name: Build (ad-hoc signed)
         env:
@@ -54,6 +63,7 @@ jobs:
 
       - name: Shellcheck scripts
         run: |
-          for f in build.sh install.sh uninstall.sh version.sh; do
+          for f in build.sh install.sh uninstall.sh version.sh run_tests.sh \
+                   run_driver.sh run_analyzer.sh; do
             bash -n "$f" && echo "OK $f"
           done

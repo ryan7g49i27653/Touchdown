@@ -174,6 +174,16 @@ signing keys outright. The reasoning, in case it is ever revisited:
 A consequence worth stating plainly: the bundle now embeds **no third-party
 code at all**, and the build touches the network at no point.
 
+## Tests
+
+```bash
+./run_tests.sh
+```
+
+No XCTest and no SwiftPM — the project builds with a bare `swiftc` call, and adding a package manifest purely to get a test runner would be a bigger change than the suite justifies. `tests/main.swift` is compiled against `TouchscreenDriver.swift` itself, so the assertions run against the shipping declarations rather than a copy. Nothing touches hardware, AppKit state or TCC, so it is safe in CI, where it runs ahead of the build.
+
+It covers the calibration constants and the coordinate mapping (including the four physically measured corner taps), the banner's box alignment, and the panel name-matching rule.
+
 ## Calibration
 
 The driver is pre-calibrated for the Xeneon Edge touchscreen:
@@ -215,7 +225,10 @@ Display:
 
 | File | Description |
 |------|-------------|
-| `TouchscreenDriver.swift` | Main driver: HID capture, CGEvent injection, menu bar |
+| `TouchscreenDriver.swift` | The driver: HID capture, CGEvent injection, menu bar. Declarations only |
+| `main.swift` | Entry point. Separate because Swift allows top-level code in one file only |
+| `tests/main.swift` | Test suite; compiled against the driver's own declarations |
+| `run_tests.sh` | Builds and runs the tests |
 | `HIDAnalyzer.swift` | Diagnostic tool to inspect raw HID reports |
 | `make-icon.swift` | Regenerates `Touchdown.icns`; not run by the build |
 | `Touchdown.icns` | App icon, committed so builds need no render step |

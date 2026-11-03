@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "🔨 Compilation de TouchscreenDriver.swift..."
-swiftc TouchscreenDriver.swift -o TouchscreenDriver \
+swiftc TouchscreenDriver.swift main.swift -o TouchscreenDriver \
     -framework IOKit \
     -framework CoreFoundation \
     -framework CoreGraphics \

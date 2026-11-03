@@ -113,6 +113,20 @@ Raw X spanned `160..16242` (insets 0.98% / 0.86% — symmetric). Raw Y spanned `
 
 Four taps produced exactly four clicks, so the 50ms debounce still holds under exclusive capture on 27.
 
+### Tests, and CI that actually runs (2026-11-03)
+
+There were no tests at all, and the CI workflow had never run against this fork's code: it triggered on `push: branches: [main]`, but `main` is pure upstream and every change lives on `local`. It was asserting things about a branch nobody commits to. `local` is now in the trigger list, and `./run_tests.sh` runs ahead of the build.
+
+**Why the driver is now two files.** Swift permits top-level code only in a file literally named `main.swift`. `TouchscreenDriver.swift` ended with `setbuf(stdout, nil)` and `main()`, which made it *impossible to add any second file to the module* — including a test file. Those two statements moved to `main.swift`; the driver file is declarations only and lost its `#!/usr/bin/env swift` hashbang, which Swift also reserves for the main file. `tests/main.swift` plays the same role for the test binary, and the two are never compiled together: choosing which `main.swift` to pass to `swiftc` is what selects driver or tests. `func main()` coexists with `main.swift` without a symbol clash — checked, not assumed.
+
+No XCTest, no SwiftPM. The project builds with one bare `swiftc` call and has no package manifest; adding one to get a test runner would dwarf the suite.
+
+**What mutation testing caught.** The first version of the suite passed 26/26 — and still passed after `touchscreenMaxY` was changed from `9599` to `9695`. The mapping tests set the globals themselves, so they never observed the *declared* constants. Those constants are the single most expensive thing here to re-verify (it means tapping all four physical corners again) and among the easiest to edit by accident. The suite now asserts the declared defaults before overwriting them. Four mutations were then tried and all four failed the suite: a 1% calibration change, an inverted Y axis, a wrong banner field width, and an off-by-one `touchscreenMaxX`.
+
+**The lesson worth keeping:** a green suite proves nothing until you have watched it go red. Mutate something real before trusting it.
+
+Not covered, and honestly so: anything needing hardware or TCC — the HID callback, the retry loop, the permission states, and `injectClick`'s cursor balance, whose fix is structural (a `defer`) rather than testable without faking the CoreGraphics calls.
+
 ### Versioning (2026-11-03)
 
 `1.5.0` was **upstream's** version, and carrying it after removing the updater, adding an icon and an About panel and fixing five bugs made two very different builds indistinguishable. The fork is now `1.6.0`, and version identity is split three ways:

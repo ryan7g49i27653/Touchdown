@@ -169,12 +169,21 @@ The **TCC grants** do not travel and must be redone per machine. That is now the
 
 This **is** a git checkout now — it was not when the note above was first written, and the claim that it had no history is stale. Layout:
 
-- **`local`** — the working branch, and what is deployed here. Carries the fork's patches *plus* the local working notes, so it is deliberately not a branch to push upstream.
-- **`main`** — tracks the published v1.5.0 state. No local patches.
-- **`fix-hid-lifetime-and-display-selection`** — the two bring-up fixes as clean, upstream-shaped hunks. This is what [bencolson/Touchdown#1](https://github.com/bencolson/Touchdown/pull/1) carries.
-- **`pin-deployment-target`**, **`sparkle-2.10.0`** — further candidates, written for upstream, not merged there. The deployment-target pin has since been applied on `local` directly, because rebuilding on macOS 27 made it load-bearing. `sparkle-2.10.0` is now only meaningful to upstream: `local` has no Sparkle to bump.
+```
+main (7031ea1, pure upstream v1.5.0 -- every commit authored by the maintainer)
+├── 5cae4e4  pin-deployment-target
+└── 9e9540e  fix-hid-lifetime-and-display-selection   <- PR #1 head
+    └── ... → local
+```
 
-**These branches were deliberately left alone when Sparkle was removed.** The removal is a `local`-only decision; `main` and the upstream-facing branches still carry Sparkle, because that is what upstream wants to receive. Do not "tidy" them to match `local`.
+- **`local`** — the working branch, and what is deployed here. Carries the fork's patches *plus* the local working notes, so it is deliberately not a branch to push upstream.
+- **`main`** — pure upstream. It is **not** "the fork's branch"; it holds none of this fork's work and exists as the reference point the other branches sit on.
+- **`fix-hid-lifetime-and-display-selection`** — the two bring-up fixes as clean, upstream-shaped hunks, and the head of [bencolson/Touchdown#1](https://github.com/bencolson/Touchdown/pull/1) (open as of 2026-11-03). It is an **ancestor of `local`**, so it holds no content `local` lacks — but deleting it would close the PR, so leave it while that is open.
+- **`pin-deployment-target`** — kept on purpose. `main`'s `build.sh` still has no `-target` flag, so **upstream still has the `minos` bug**, and this is the only upstream-shaped copy of the fix. It cannot be cherry-picked out of `local`: `local`'s `build.sh` has no Sparkle and has diverged structurally, so recovering it would mean re-deriving the hunk against `main`.
+
+`sparkle-2.10.0` was deleted on 2026-11-03 (was `9f2af27`, a Sparkle 2.9.6 → 2.10.0 bump plus a macOS 12 floor, sitting on top of `pin-deployment-target`). It was useful only to upstream, trivially redone there, and actively misleading on a fork with no Sparkle.
+
+**The Sparkle removal is a `local`-only decision.** `main` and `fix-hid…` still carry Sparkle because that is what upstream should receive. Do not "tidy" them to match `local`.
 
 There is no `upstream` remote configured, so pulling the maintainer's changes means adding one. Expect conflicts in `build.sh` and `version.sh` — `local` has diverged structurally, not just by a patch or two.
 

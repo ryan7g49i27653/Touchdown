@@ -4,10 +4,19 @@
 #
 #   ./build.sh <output-dir>
 #
-# Shared by install.sh and release.sh so the installed app and the released
-# app are byte-for-byte the same recipe. Override SIGN_IDENTITY to change the
-# signing identity, or set it to "-" for ad-hoc (permissions will then break
-# on every update -- see the note in install.sh).
+# Used by install.sh. This fork builds from source only -- it ships no
+# releases and has no auto-updater -- so there is no second consumer to keep
+# byte-for-byte identical.
+#
+# Ad-hoc is the default signing identity. Upstream defaults to a Developer ID
+# because an ad-hoc signed *auto-updater* breaks itself: every update lands a
+# new cdhash, TCC stops recognising the app and the driver silently stops
+# injecting clicks. With no updater that reasoning no longer applies, and the
+# upstream maintainer's certificate is not on this machine, so defaulting to
+# it only produced "no identity found". Override SIGN_IDENTITY to sign with a
+# real certificate; an Apple Development cert is the one worth having, since
+# its designated requirement is hash-free and the TCC grants then survive a
+# rebuild.
 
 set -e
 
@@ -18,16 +27,8 @@ source "$SCRIPT_DIR/version.sh"
 
 APP="$OUT_DIR/$APP_NAME.app"
 EXEC_PATH="$APP/Contents/MacOS/$APP_NAME"
-SPARKLE="$SCRIPT_DIR/vendor/sparkle/Sparkle.framework"
 
-SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Benjamin Colson (99L757HY7N)}"
-
-"$SCRIPT_DIR/fetch-sparkle.sh"
-
-if [ ! -d "$SPARKLE" ]; then
-    echo "❌ Sparkle.framework missing at $SPARKLE"
-    exit 1
-fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
 echo "🔨 Compiling $APP_NAME $VERSION..."
 # swiftc writes straight into OUT_DIR, so it has to exist first or ld fails
@@ -47,27 +48,20 @@ cd "$SCRIPT_DIR"
 # uname -m rather than a literal arm64, so an Intel host still builds natively.
 TARGET="$(uname -m)-apple-macos11.0"
 
-# @executable_path/../Frameworks so the embedded Sparkle is found at runtime.
 swiftc TouchscreenDriver.swift -o "$OUT_DIR/.$APP_NAME.bin" \
     -target "$TARGET" \
     -framework IOKit \
     -framework CoreFoundation \
     -framework CoreGraphics \
     -framework AppKit \
-    -F "$SCRIPT_DIR/vendor/sparkle" \
-    -framework Sparkle \
-    -Xlinker -rpath -Xlinker "@executable_path/../Frameworks" \
     -O
 echo "✅ Compiled"
 
 echo "📦 Building app bundle..."
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 mv "$OUT_DIR/.$APP_NAME.bin" "$EXEC_PATH"
 chmod +x "$EXEC_PATH"
-
-# -R preserves the framework's symlink farm, which codesign requires intact.
-cp -R "$SPARKLE" "$APP/Contents/Frameworks/"
 
 # The icon is committed rather than generated here: make-icon.swift needs a
 # full AppKit render and the artwork changes far less often than the code.
@@ -106,40 +100,22 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>11.0</string>
     <key>LSUIElement</key>
     <true/>
-    <key>SUFeedURL</key>
-    <string>$FEED_URL</string>
-    <key>SUPublicEDKey</key>
-    <string>$PUBLIC_ED_KEY</string>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
-    <key>SUScheduledCheckInterval</key>
-    <integer>86400</integer>
 </dict>
 </plist>
 PLIST
 
-# Hardened runtime and a secure timestamp are required for notarization, but
-# both are rejected for ad-hoc signatures -- so CI (SIGN_IDENTITY=-) omits them.
+# A hardened runtime and a secure timestamp are rejected for ad-hoc
+# signatures, so they only go on when signing with a real certificate.
 SIGN_FLAGS=(--force)
 if [ "$SIGN_IDENTITY" != "-" ]; then
     SIGN_FLAGS+=(--options runtime --timestamp)
 fi
 
-# Sign inside-out: nested code first, then the framework, then the app.
-# --deep is unreliable for Sparkle's XPC services and Updater.app.
+# One call: the bundle holds no nested code now that Sparkle's framework, its
+# two XPC services and Updater.app are gone, so there is nothing to sign
+# inside-out and nothing for --deep to get wrong.
 echo "🔐 Signing with: $SIGN_IDENTITY"
-SP="$APP/Contents/Frameworks/Sparkle.framework"
-for nested in \
-    "$SP/Versions/B/XPCServices/Downloader.xpc" \
-    "$SP/Versions/B/XPCServices/Installer.xpc" \
-    "$SP/Versions/B/Updater.app" \
-    "$SP/Versions/B/Autoupdate"
-do
-    [ -e "$nested" ] || continue
-    codesign "${SIGN_FLAGS[@]}" -s "$SIGN_IDENTITY" "$nested"
-done
-codesign "${SIGN_FLAGS[@]}" -s "$SIGN_IDENTITY" "$SP"
 codesign "${SIGN_FLAGS[@]}" -s "$SIGN_IDENTITY" "$APP"
 
-codesign --verify --deep --strict "$APP"
+codesign --verify --strict "$APP"
 echo "✅ Signed and verified: $APP"

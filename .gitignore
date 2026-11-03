@@ -33,11 +33,8 @@ Thumbs.db
 *.idea/
 *.vscode/
 
-# Sparkle (fetched by fetch-sparkle.sh)
-vendor/
-
-# Release artifacts
-dist/
+# CI build output
+ci-out/
 
 # Icon intermediate. make-icon.swift emits this iconset; only the .icns that
 # iconutil builds from it is committed.

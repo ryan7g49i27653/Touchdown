@@ -410,12 +410,10 @@ final class StatusController: NSObject {
     private let stateItem = NSMenuItem(title: "…", action: nil, keyEquivalent: "")
     private let displayItem = NSMenuItem(title: "…", action: nil, keyEquivalent: "")
 
-    // Pas d'updater Sparkle: le menu n'expose plus « Check for Updates… », et
-    // démarrer l'updater sans interface laisserait des vérifications
-    // automatiques injoignables — SUEnableAutomaticChecks vaut true dans
-    // l'Info.plist, et la préférence qui le désactive ne suit pas la machine.
-    // Le framework reste embarqué, donc rétablir les deux revient à annuler
-    // ce commit.
+    // Pas de mise à jour automatique: ce fork ne publie rien. Sparkle a été
+    // entièrement retiré — plus de framework embarqué, plus de flux, plus
+    // d'entrée « Check for Updates… » dans le menu. Mettre à jour, ici, c'est
+    // relancer ./install.sh.
 
     // À appeler sur le thread principal avant NSApplication.run(), pour que
     // l'état « en attente de permission » soit déjà visible.
@@ -626,8 +624,8 @@ func attachDriver() {
 // Programme principal
 // ============================================
 
-// Sparkle relance l'app lui-même après une mise à jour, et launchd peut aussi
-// en démarrer une. Deux instances en mode exclusif se disputeraient le seize
+// install.sh relance le LaunchAgent alors qu'une copie lancée à la main peut
+// encore tourner. Deux instances en mode exclusif se disputeraient le seize
 // HID, donc la plus récente s'efface.
 func ensureSingleInstance() {
     guard let bundleID = Bundle.main.bundleIdentifier else { return }

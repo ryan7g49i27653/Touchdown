@@ -22,7 +22,7 @@ Without it, macOS ignores the panel's HID digitizer interface (usage page `0x0D`
 
 **`LSUIElement`** plus `.accessory` activation policy so it stays out of the Dock and ⌘-Tab, and `uninstall.sh` clears the TCC records so a later reinstall prompts cleanly.
 
-Released builds are Developer ID signed and notarized, so the designated requirement pins the bundle ID and team rather than a hash — **permission grants survive updates**. Only ad-hoc local builds (`SIGN_IDENTITY=-`) are hash-pinned and void the grants on every rebuild.
+**No auto-updater.** Upstream bundles Sparkle and polls an appcast daily. This fork removed it outright — no framework, no feed, no *Check for Updates…*, no update UI of any kind. It builds from source only, so updating means pulling and re-running `./install.sh`. That also means the bundle embeds no third-party code at all.
 
 ## Menu bar
 
@@ -58,35 +58,13 @@ The status item uses the `hand.rays` SF Symbol as a template image. The app icon
 
 - macOS 11+ (Big Sur or later)
 - Corsair Xeneon Edge connected via USB-C
-- Xcode Command Line Tools (`xcode-select --install`) — **only** to build from source; installing the release needs nothing
+- Xcode Command Line Tools (`xcode-select --install`)
 
-> **Minimum OS is pinned, not inherited.** `build.sh` passes `-target $(uname -m)-apple-macos11.0`, so the binary's `LC_BUILD_VERSION` matches what `Info.plist` advertises regardless of which macOS the build host runs. Without that flag `swiftc` stamps the *host's* version instead — a build produced on macOS 27 would report `minos 27.2` and refuse to launch on anything earlier, installing cleanly and then doing nothing. The vendored Sparkle 2.9.6 is itself `minos 11.0`, so 11.0 is the real floor; raise one without the other and the feed advertises a build some machines cannot run. Check with `vtool -show-build <binary>`.
+> **Minimum OS is pinned, not inherited.** `build.sh` passes `-target $(uname -m)-apple-macos11.0`, so the binary's `LC_BUILD_VERSION` matches what `Info.plist` advertises regardless of which macOS the build host runs. Without that flag `swiftc` stamps the *host's* version instead — a build produced on macOS 27 would report `minos 27.2` and refuse to launch on anything earlier, installing cleanly and then doing nothing. Check with `vtool -show-build <binary>`; CI asserts it.
 
 ## Installation
 
-### From the release (recommended)
-
-No Xcode, no clone, no signing identity:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bencolson/Touchdown/main/install-release.sh | bash
-```
-
-This reads the same appcast Sparkle reads, downloads the published build, and
-**refuses to install it unless it passes three checks**: an intact signature,
-team `99L757HY7N`, and Gatekeeper acceptance (i.e. genuinely notarized). It then
-installs to `~/Applications`, registers the LaunchAgent, and starts it. No sudo.
-
-`--dry-run` verifies the current release and installs nothing.
-
-Note that `codesign --verify` alone is not sufficient — an ad-hoc signature is
-internally valid too. The team and Gatekeeper checks are what make a substituted
-build fail.
-
-### From source
-
-Needs a Developer ID Application certificate for the team, so in practice this
-is the build machine only:
+This fork builds from source. There is no published build to download.
 
 ```bash
 git clone https://github.com/bencolson/Touchdown.git
@@ -94,20 +72,17 @@ cd Touchdown
 ./install.sh
 ```
 
-Compiles, signs, installs to `~/Applications`, registers the LaunchAgent, and
-starts it. Without that certificate it fails at `codesign` with *"no identity
-found"* — use the release installer above instead.
+Compiles, signs ad-hoc, installs to `~/Applications`, registers the LaunchAgent,
+and starts it. No sudo, no Developer ID, no network access during the build.
 
-To hack on the driver without the Developer ID, override the identity:
+Ad-hoc pins the designated requirement to a `cdhash`, so **every rebuild voids
+both permission grants** and the driver does nothing at all until both are
+re-granted. If you rebuild often, an Apple Development certificate is worth
+having — its requirement is hash-free, so the grants survive:
 
 ```bash
 SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./install.sh
 ```
-
-Prefer that over ad-hoc (`SIGN_IDENTITY=-`). Ad-hoc pins the designated
-requirement to a `cdhash`, so **every rebuild voids both permission grants** and
-this driver does nothing at all until both are re-granted. An Apple Development
-identity produces a hash-free requirement, so the grants survive rebuilds.
 
 ### Uninstall
 
@@ -165,96 +140,37 @@ launchctl load ~/Library/LaunchAgents/com.bencolson.touchdown.plist
 
 ## Updating
 
-Releases are published through [Sparkle](https://sparkle-project.org) 2.9.6, fed by `appcast.xml` in this repo.
-
-> **This fork does not start the updater.** `StatusController` creates no `SPUStandardUpdaterController`, and the menu has no **Check for Updates…** item, so a build from this source never polls the feed and never installs an update — on purpose. The framework is still vendored and embedded, so restoring both is a one-commit revert. `appcast.xml`, `release.sh` and `install-release.sh` are untouched and still work; updating an installed copy means running `install-release.sh` or `install.sh` again.
-
-### Why this needs a Developer ID
-
-TCC keys permissions differently depending on how the app is signed:
-
-| Signing | TCC keys on | Effect on updates |
-|---|---|---|
-| Ad-hoc | `cdhash` of the binary | **Every update voids Accessibility and Input Monitoring** |
-| Developer ID | bundle ID + team ID | Permissions survive every update |
-
-An ad-hoc signed auto-updater breaks itself: each update installs a binary with a new hash, TCC no longer recognises it, and the driver silently stops injecting clicks until you re-grant both permissions by hand. `build.sh` therefore signs with a Developer ID by default. Verify the designated requirement has no hash in it:
+There is no updater. Pull and reinstall:
 
 ```bash
-codesign -d --requirements - ~/Applications/Touchdown.app
-# designated => identifier "com.bencolson.touchdown" and anchor apple generic
-#   and certificate leaf[subject.OU] = "99L757HY7N"
+git pull && ./install.sh
 ```
 
-### Notarization is required, not optional
+Budget a re-grant of both permissions afterwards: an ad-hoc signature pins the
+designated requirement to a `cdhash`, and recompiling changes it. See
+[Installation](#installation) for the Apple Development certificate that avoids
+this.
 
-Sparkle downloads updates over the network, so macOS applies the quarantine attribute. Gatekeeper rejects an unnotarized Developer ID app, which means an unnotarized update installs and then refuses to launch. `release.sh` refuses to publish without a notarytool profile.
+### What was removed, and why it is not coming back
 
-Set one up once:
+Upstream ships [Sparkle](https://sparkle-project.org) and polls an appcast once
+a day. This fork removed the framework, the feed, the release pipeline and the
+signing keys outright. The reasoning, in case it is ever revisited:
 
-```bash
-xcrun notarytool store-credentials touchdown-notary \
-  --apple-id <your-apple-id> \
-  --team-id 99L757HY7N \
-  --password <app-specific-password>   # appleid.apple.com → App-Specific Passwords
-```
+- **An ad-hoc signed auto-updater breaks itself.** Every update lands a binary
+  with a new `cdhash`, TCC stops recognising the app, and the driver silently
+  stops injecting clicks until both permissions are re-granted by hand. Keeping
+  Sparkle therefore forces a Developer ID certificate, notarization, and a
+  release pipeline to go with it.
+- **That pipeline needs two private keys** — a Developer ID certificate and a
+  Sparkle EdDSA key — neither of which this fork holds. The EdDSA key in
+  particular has no recovery path: its public half is embedded in every
+  installed copy, so losing it means no client can ever accept another update.
+- **None of it bought anything here.** This is a two-machine, build-from-source
+  fork. `git pull && ./install.sh` is the whole update story.
 
-### Cutting a release
-
-```bash
-# 1. bump VERSION in version.sh
-# 2. rehearse: builds, archives, signs, renders the appcast item, publishes nothing
-./release.sh --dry-run "What changed."
-
-# 3. ship it
-NOTARY_PROFILE=touchdown-notary ./release.sh "What changed."
-```
-
-`release.sh` builds via `build.sh`, archives with `ditto` (plain `zip` mangles the signed bundle's symlinks and invalidates the signature), notarizes and staples, signs the archive with the Sparkle EdDSA key, publishes a GitHub release, prepends the item to `appcast.xml`, and pushes. It refuses to run against a dirty tree or a tag that already exists.
-
-### Keys
-
-Two private keys matter, both in the login Keychain and neither in this repo:
-
-- **Developer ID certificate** — code signing.
-- **Sparkle EdDSA key**, stored as *"Private key for signing Sparkle updates"*. Its public half is `SUPublicEDKey` in the app's `Info.plist`. **Back this up.** Lose it and no installed copy will ever accept another update, because signatures will stop matching the embedded public key — you would have to reinstall every client by hand.
-
-Export it for backup with `vendor/sparkle/bin/generate_keys -x`.
-
-### Setting up a build machine
-
-Releases are cut from one designated machine that holds the keys; every other Mac is just a client running the driver. On the build machine:
-
-```bash
-git clone https://github.com/bencolson/Touchdown.git
-cd Touchdown
-./setup-release-machine.sh
-```
-
-It audits the toolchain, the Developer ID cert, `gh` auth, the notarytool profile, and the Sparkle key, then does a test build and prints the resulting designated requirement.
-
-What actually has to move between machines is narrower than it looks:
-
-| | Migrate? | Why |
-|---|---|---|
-| Developer ID certificate | **No** | The designated requirement pins `subject.OU` — the *team* — not a specific certificate. Any Developer ID Application cert from the same team satisfies it, so issue a fresh one in Xcode and existing TCC grants still hold. |
-| Sparkle EdDSA key | **Yes, after the first release** | Its public half is embedded in every installed copy's `Info.plist`. Sparkle rejects signatures that don't match, and there is no recovery path. |
-| notarytool profile | No | Re-run `store-credentials`. |
-| `gh` auth | No | Re-run `gh auth login`. |
-
-Before the first release there is no installed base to honour, so the simplest move is to generate a fresh Sparkle key on the build machine, update `PUBLIC_ED_KEY` in `version.sh`, and reinstall once on each client. After the first release that option is gone — export and import the original instead:
-
-```bash
-# machine that has the key
-vendor/sparkle/bin/generate_keys -x sparkle-key.txt
-# build machine
-vendor/sparkle/bin/generate_keys -f sparkle-key.txt
-rm -P sparkle-key.txt
-```
-
-### Why releases are cut locally, not in CI
-
-`.github/workflows/build.yml` verifies that the driver compiles, bundles, signs ad-hoc, and links Sparkle via `@rpath` — but it does not release. Publishing needs both private keys, and putting them in GitHub secrets would place the signing identity for every future update on a shared runner. Releases are cut from a machine that already holds the keys.
+A consequence worth stating plainly: the bundle now embeds **no third-party
+code at all**, and the build touches the network at no point.
 
 ## Calibration
 
@@ -301,14 +217,11 @@ Display:
 | `HIDAnalyzer.swift` | Diagnostic tool to inspect raw HID reports |
 | `make-icon.swift` | Regenerates `Touchdown.icns`; not run by the build |
 | `Touchdown.icns` | App icon, committed so builds need no render step |
-| `version.sh` | Single source of truth for version, bundle ID, feed URL, public key |
+| `version.sh` | Single source of truth for app name, bundle ID and version |
 | `build.sh` | Builds and signs `Touchdown.app` into a given directory |
 | `install.sh` | Builds, installs to `~/Applications`, registers the LaunchAgent |
-| `uninstall.sh` | Removes app, LaunchAgent, Sparkle caches, TCC records, legacy layouts |
-| `release.sh` | Cuts a release: archive, notarize, sign, publish, update appcast |
-| `fetch-sparkle.sh` | Downloads Sparkle and verifies its SHA-256 |
-| `appcast.xml` | The Sparkle update feed clients poll |
-| `run_driver.sh` | Build and run the driver in the foreground |
+| `uninstall.sh` | Removes app, LaunchAgent, caches, TCC records, legacy layouts |
+| `run_driver.sh` | Build and run the driver in the foreground, unbundled |
 | `run_analyzer.sh` | Build and run the analyzer |
 
 ## Troubleshooting

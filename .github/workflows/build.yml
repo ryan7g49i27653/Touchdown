@@ -2,11 +2,9 @@ name: Build
 
 # Verifies the driver compiles and bundles on a clean machine.
 #
-# Deliberately does NOT build releases. Releasing requires the Developer ID
-# certificate and the Sparkle EdDSA private key, and exporting either into
-# GitHub secrets would put the signing identity for every future update on
-# a shared runner. Releases are cut locally with ./release.sh, where both keys
-# stay in the login Keychain.
+# This fork publishes nothing, so there is no release job and no signing
+# identity in CI -- the build here is ad-hoc signed, which is also what
+# build.sh does by default.
 
 on:
   push:
@@ -25,9 +23,6 @@ jobs:
           swift --version
           sw_vers
 
-      - name: Fetch Sparkle
-        run: ./fetch-sparkle.sh
-
       - name: Build (ad-hoc signed)
         env:
           SIGN_IDENTITY: "-"
@@ -39,24 +34,26 @@ jobs:
         run: |
           APP=ci-out/Touchdown.app
           test -x "$APP/Contents/MacOS/Touchdown"
-          test -d "$APP/Contents/Frameworks/Sparkle.framework"
+          test -f "$APP/Contents/Resources/Touchdown.icns"
           plutil -lint "$APP/Contents/Info.plist"
-          codesign --verify --deep --strict "$APP"
-          # The embedded framework must be reachable via @rpath, or the app
-          # builds fine and then dies at launch with a dyld error.
-          otool -L "$APP/Contents/MacOS/Touchdown" | grep -q '@rpath/Sparkle.framework'
-          echo "✅ bundle layout, signature and Sparkle linkage all verified"
+          codesign --verify --strict "$APP"
+          # Nothing may link against a framework any more: the bundle embeds
+          # none, so an @rpath reference would be a dyld error at launch.
+          ! otool -L "$APP/Contents/MacOS/Touchdown" | grep -q '@rpath/'
+          test ! -d "$APP/Contents/Frameworks"
+          # The deployment target is pinned, so it must not track the runner's
+          # OS. Catching this here is the point -- it is invisible until the
+          # app is run on an older machine.
+          vtool -show-build "$APP/Contents/MacOS/Touchdown" | grep -q 'minos 11.0'
+          echo "✅ bundle layout, signature, linkage and deployment target verified"
 
       - name: Build analyzer
         run: |
           swiftc HIDAnalyzer.swift -o ci-out/HIDAnalyzer \
             -framework IOKit -framework CoreFoundation -O
 
-      - name: Validate appcast
-        run: python3 -c "import xml.dom.minidom;xml.dom.minidom.parse('appcast.xml');print('appcast.xml OK')"
-
       - name: Shellcheck scripts
         run: |
-          for f in build.sh install.sh uninstall.sh release.sh fetch-sparkle.sh version.sh; do
+          for f in build.sh install.sh uninstall.sh version.sh; do
             bash -n "$f" && echo "OK $f"
           done

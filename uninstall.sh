@@ -2,8 +2,8 @@
 
 # Touchdown uninstaller
 
-# Works standalone over curl as well as from a clone: an install done with
-# install-release.sh has no repo to source version.sh from.
+# Falls back to literals when version.sh is not beside it, so the script still
+# works when copied somewhere on its own.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/version.sh" ]; then
     source "$SCRIPT_DIR/version.sh"
@@ -39,7 +39,8 @@ if [ -d "$APP" ]; then
     echo "✅ App removed"
 fi
 
-# Sparkle's own state: update cache, and the per-bundle check-interval prefs.
+# Caches and the preference domain (LogTouchPoints, plus the stale Sparkle
+# keys left behind by builds from before the updater was removed).
 rm -rf "$HOME/Library/Caches/$BUNDLE_ID" 2>/dev/null || true
 rm -rf "$HOME/Library/Caches/org.sparkle-project.Sparkle/$BUNDLE_ID" 2>/dev/null || true
 defaults delete "$BUNDLE_ID" >/dev/null 2>&1 || true
@@ -61,7 +62,3 @@ tccutil reset ListenEvent "$BUNDLE_ID" >/dev/null 2>&1 || true
 
 echo ""
 echo "✅ Uninstallation complete."
-echo ""
-echo "Note: the Sparkle EdDSA private key remains in your Keychain as"
-echo "\"Private key for signing Sparkle updates\". Keep it -- losing it means"
-echo "existing installs can never verify another update."

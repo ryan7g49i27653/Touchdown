@@ -60,24 +60,24 @@ launchctl unload ~/Library/LaunchAgents/com.bencolson.touchdown.plist; sleep 2; 
 **7. Still broken — rebuild from source.** Costs one re-grant of both permissions, because ad-hoc signing produces a new `cdhash` every compile:
 
 ```bash
-cd ~/Projects/touchdown && SIGN_IDENTITY=- ./install.sh
+cd ~/Projects/touchdown && ./install.sh
 ```
 
-If **4** or **6** ever fires, suspect the patched build was replaced — a stock build reports `Active` and silently does nothing. The fastest tell is the menu itself: this fork's build has **no *Check for Updates…* and no *Version* line**, so if either is present you are looking at a stock build. Confirm from the shell:
+If **4** or **6** ever fires, suspect the patched build was replaced — a stock build reports `Active` and silently does nothing. The fastest tell is the menu: this fork's build has **no *Check for Updates…* and no *Version* line**. Confirm from the shell:
 
 ```bash
-otool -L ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c Sparkle   # 1 either way — framework is still embedded
-nm -u ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c SPUStandardUpdater   # expect 0 on this fork's build
+# This fork embeds no frameworks at all. A stock build has Sparkle in both.
+test -d ~/Applications/Touchdown.app/Contents/Frameworks && echo "STOCK BUILD" || echo "this fork"
+otool -L ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c '@rpath/'   # expect 0
 ```
 
-Nothing can replace it automatically — the updater is not started and the feed is never polled — so a swapped build means someone ran `install-release.sh`, or copied a bundle in.
+Nothing can replace it automatically — there is no updater and no feed — so a swapped build means someone copied a bundle in by hand.
 
 ## Machine roles
 
-- **Client** — where the panel is plugged in and the driver runs. Needs only `./install.sh`.
-- **Build machine** — holds the Developer ID certificate and the Sparkle signing key, and is the only machine that cuts releases. Run `./setup-release-machine.sh` there to audit readiness.
+Both machines are clients: the panel is plugged in and the driver runs, installed with `./install.sh`. There is no build machine, because this fork publishes nothing.
 
-Keep the signing keys on the build machine only. Nothing needs to be exported to a client.
+Everything about Developer ID certificates, notarization profiles, Sparkle signing keys and release cutting was **upstream maintainer** infrastructure. It was removed on 2026-11-03 along with Sparkle itself — see *Sparkle removed* below. If you are reading an older commit and wondering where `release.sh`, `setup-release-machine.sh`, `install-release.sh`, `fetch-sparkle.sh` or `appcast.xml` went, that is where.
 
 ## Status — macOS 27.2 verified (2026-11-03)
 
@@ -122,17 +122,27 @@ Two things worth not rediscovering:
 
 The glyph is nudged off geometric centre (`-1.0%` x, `+1.8%` y) because its mass sits bottom-right while the tap arc is light and top-left.
 
-### Update UI removed (2026-11-03)
+### Sparkle removed entirely (2026-11-03)
 
-The menu bar drop-down no longer has *Check for Updates…* or a *Version* line, and `StatusController` no longer builds an `SPUStandardUpdaterController`. Removing only the menu items would have left the updater running with no interface — `startingUpdater: true` schedules background checks independently of the menu, and `Info.plist` sets `SUEnableAutomaticChecks` true while the pref that disables it does not travel between machines. So the updater went too. Verify which build you are holding:
+Done in two steps on the same day, which is why the git history shows it twice.
+
+**Step one — the update UI.** The menu lost *Check for Updates…* and the *Version* line, and `StatusController` stopped building an `SPUStandardUpdaterController`. Removing only the menu items would have left the updater running with no interface to reach it: `startingUpdater: true` schedules background checks independently of the menu, and `Info.plist` set `SUEnableAutomaticChecks` true while the pref that disables it is per-user and per-machine, so it never travelled with a bundle.
+
+**Step two — everything else**, once it was clear the fork has no interest in maintaining an updater. Gone: the vendored framework (123 MB on disk), `-framework Sparkle` and the `@rpath` linker flag, `Contents/Frameworks`, the four `SU*` Info.plist keys, `FEED_URL` / `PUBLIC_ED_KEY` / `SPARKLE_KEY_ACCOUNT` / `REPO` from `version.sh`, and the files `fetch-sparkle.sh`, `appcast.xml`, `release.sh`, `setup-release-machine.sh` and `install-release.sh`.
+
+Three consequences worth knowing:
+
+- **The bundle embeds no third-party code**, and the build touches the network at no point. `Contents/` is now just `MacOS/`, `Resources/`, `Info.plist` and `_CodeSignature/`.
+- **Signing is one `codesign` call.** The inside-out loop existed only because `--deep` is unreliable for Sparkle's two XPC services and `Updater.app`. With no nested code there is nothing for it to get wrong.
+- **`build.sh` defaults to ad-hoc** (`SIGN_IDENTITY=-`) instead of the upstream maintainer's Developer ID. That default existed because an ad-hoc signed *auto-updater* breaks itself — each update lands a new `cdhash` and TCC stops recognising the app. With no updater the reasoning is gone, and the certificate was never on this machine, so the old default only ever produced "no identity found".
+
+Verify a build is this fork's:
 
 ```bash
-nm -u ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c SPUStandardUpdater   # 0 here, 1 on a stock build
+test -d ~/Applications/Touchdown.app/Contents/Frameworks && echo "STOCK BUILD" || echo "this fork"
 ```
 
-Sparkle stays vendored, linked and embedded, so restoring the updater is a one-commit revert. `appcast.xml`, `release.sh` and `install-release.sh` are untouched.
-
-`build.sh` now pins `-target $(uname -m)-apple-macos11.0`. This became load-bearing rather than theoretical: the first rebuild on 27.2 stamped `minos 27.2`, which would have refused to launch on the second machine. See the rough edge below.
+`build.sh` also pins `-target $(uname -m)-apple-macos11.0`. This became load-bearing rather than theoretical: the first rebuild on 27.2 stamped `minos 27.2`, which would have refused to launch on the second machine. See the rough edge below.
 
 ## Status — client bring-up complete (2026-08-21)
 
@@ -140,22 +150,20 @@ Both items that were outstanding here are cleared. The driver has now run agains
 
 Getting there required fixing two real bugs — see *First hardware bring-up* below. Neither was visible until the driver was actually receiving events, which is why both survived into a shipped release.
 
-> **Whose machine is this?** The sections on the build machine, Sparkle keys and release cutting describe the **upstream maintainer's** setup. This working copy is a downstream fork run by a user who does not hold those keys and does not cut releases. Read them as inherited context, not as a description of this machine.
-
 ### Deployment on this machine
 
-- `~/Applications/Touchdown.app`, **ad-hoc signed** (`SIGN_IDENTITY=-`), built from locally patched source — *not* the published release.
-- Sparkle **not started at all** since 2026-11-03: `StatusController` creates no `SPUStandardUpdaterController`, and the menu has no *Check for Updates…* and no *Version* line. The feed is never polled and there is no manual check either. This replaces the old pref-based arrangement, which was fragile for a reason worth keeping in mind: `SUEnableAutomaticChecks` / `SUAutomaticallyUpdate` are per-user *and* per-machine, so they never travelled with a bundle — a copy always arrived with auto-update **enabled**, because `Info.plist` sets `SUEnableAutomaticChecks` to true. The prefs are still set to false here, now redundantly. The framework stays vendored and embedded, so restoring the updater is a one-commit revert.
+- `~/Applications/Touchdown.app`, **ad-hoc signed**, built from locally patched source. Ad-hoc is now `build.sh`'s default, so plain `./install.sh` is correct — the `SIGN_IDENTITY=-` prefix in older notes is no longer needed, though it is still honoured.
+- **No updater of any kind** since 2026-11-03. Updating is `git pull && ./install.sh`.
 - Per-touch coordinate logging **off by default** — see `LogTouchPoints` below.
-- Ad-hoc means **every rebuild revokes both permissions**. Budget a re-grant *and* a driver restart per rebuild. An Apple Development certificate would remove this cost entirely; none is installed here.
+- Ad-hoc means **every rebuild revokes both permissions**. Budget a re-grant *and* a driver restart per rebuild. An Apple Development certificate would remove this cost entirely; none is installed here. Stale `SU*` keys may linger in the preference domain from older builds; they are inert, and `uninstall.sh` clears them.
 
 ### Second machine
 
-A second Mac (same Apple Silicon architecture, same panel) runs the same patched build. It was deployed by copying **source**, not the `.app` bundle, and building there with `SIGN_IDENTITY=- ./install.sh`.
+A second Mac (same Apple Silicon architecture, same panel) runs the same patched build. It was deployed by copying **source**, not the `.app` bundle, and building there with `./install.sh`.
 
 Prefer that over copying the bundle, for two reasons that both disappear when you build locally: the binary gets that machine's architecture, and a locally compiled app never acquires a quarantine attribute, so Gatekeeper never has to weigh in on an ad-hoc signature. `minos` used to be a third reason; `build.sh` now pins it, so it no longer varies by host.
 
-The **TCC grants** do not travel and must be redone per machine. The Sparkle prefs no longer matter either way, since nothing starts the updater — but if you ever revert that, they are per-user and per-machine, so a copied bundle arrives with auto-update *enabled*.
+The **TCC grants** do not travel and must be redone per machine. That is now the only thing that does not — the Sparkle prefs that used to be the other half of this warning no longer exist.
 
 ### Where the patched source lives
 
@@ -164,9 +172,11 @@ This **is** a git checkout now — it was not when the note above was first writ
 - **`local`** — the working branch, and what is deployed here. Carries the fork's patches *plus* the local working notes, so it is deliberately not a branch to push upstream.
 - **`main`** — tracks the published v1.5.0 state. No local patches.
 - **`fix-hid-lifetime-and-display-selection`** — the two bring-up fixes as clean, upstream-shaped hunks. This is what [bencolson/Touchdown#1](https://github.com/bencolson/Touchdown/pull/1) carries.
-- **`pin-deployment-target`**, **`sparkle-2.10.0`** — further candidates, written for upstream, not merged there. The deployment-target pin has since been applied on `local` directly, because rebuilding on macOS 27 made it load-bearing; `sparkle-2.10.0` is still only a branch.
+- **`pin-deployment-target`**, **`sparkle-2.10.0`** — further candidates, written for upstream, not merged there. The deployment-target pin has since been applied on `local` directly, because rebuilding on macOS 27 made it load-bearing. `sparkle-2.10.0` is now only meaningful to upstream: `local` has no Sparkle to bump.
 
-`vendor/` (107 MB) is fetched by `fetch-sparkle.sh` and is regenerable; `.gitignore` excludes it along with `dist/`. There is no `upstream` remote configured, so pulling the maintainer's changes means adding one.
+**These branches were deliberately left alone when Sparkle was removed.** The removal is a `local`-only decision; `main` and the upstream-facing branches still carry Sparkle, because that is what upstream wants to receive. Do not "tidy" them to match `local`.
+
+There is no `upstream` remote configured, so pulling the maintainer's changes means adding one. Expect conflicts in `build.sh` and `version.sh` — `local` has diverged structurally, not just by a patch or two.
 
 ## First hardware bring-up (2026-08-21)
 
@@ -244,54 +254,49 @@ defaults write com.bencolson.touchdown LogTouchPoints -bool true
 
 Restart the driver to pick it up. Runtime rather than compile-time deliberately: ad-hoc rebuilds cost two permission re-grants, and debugging calibration should not require paying that.
 
-## Provenance of the published v1.5.0 build
+## Installing, and how to sign
 
-Independently audited before install (2026-08-21). Recorded so it is not redone from scratch.
-
-- Fetched from the appcast's own enclosure URL. Length matched (`1107060`). SHA-256 `db6dee97df87ea2e54a22dbd898021bcf8627ca0fec22aea3b1d67de7ae12add`.
-- The live feed's `edSignature` **verifies** against that zip under `PUBLIC_ED_KEY` — checked with an independent Ed25519 implementation rather than the bundled `sign_update`, so the result does not depend on the project's own tooling.
-- `codesign` valid, team `99L757HY7N`, hardened runtime, secure timestamp. `spctl` reports `accepted` / `source=Notarized Developer ID`; stapled ticket validates.
-- Designated requirement contains **no `cdhash`** — it pins bundle ID and team, which is what makes grants survive updates.
-- The main binary imports **zero networking symbols** — no `URLSession`, no `CFNetwork`, no sockets. Its only path string is `/tmp/touchdown.log`. No `CGEventTapCreate` (so it cannot read keystrokes despite holding Accessibility), and no `posix_spawn` / `dlopen` / `system`. Imported symbols match the reviewed source one-to-one.
-- Bundle contains one binary plus stock Sparkle. No extra executables, no scripts, no entitlements.
-- `build.sh` **re-signs** the vendored Sparkle with the project's own certificate, so its signature cannot prove it unmodified. Checked directly instead: with signatures stripped, the shipped `Sparkle` binary and all four helpers (`Autoupdate`, `Downloader`, `Installer`, `Updater`) are **byte-identical** to the official 2.9.6 release — whose tarball hash also matches the pin in `fetch-sparkle.sh`.
-
-v1.5.0 is clean. This covers **that build only**: the auto-updater makes every future release a fresh trust decision, inheriting TCC grants automatically because the designated requirement pins team rather than hash. That is precisely why auto-update is disabled here.
-
-## Installing, and the three ways to sign
-
-`install-release.sh` is the client path: it reads the appcast, downloads the published build, and installs it with no Xcode, no clone and no signing identity. It is deliberately self-contained so it works over `curl | bash`, which is why it duplicates the LaunchAgent plist and a few constants from `install.sh` — **keep the two in step**. `uninstall.sh` has the same standalone fallback for the same reason.
-
-It refuses to install unless the build passes three checks: intact signature, team `99L757HY7N`, and Gatekeeper acceptance. All three are needed — `codesign --verify` **passes on an ad-hoc build**, so on its own it would not catch a substituted one. Verified by running an ad-hoc build against all three: signature passed, team and Gatekeeper both rejected.
-
-`install.sh` builds from source and needs the Developer ID cert, so it is effectively build-machine-only. For development elsewhere, override the identity — and prefer an Apple Development cert over ad-hoc:
+`./install.sh` is the only install path. It builds from source, signs ad-hoc by
+default, installs to `~/Applications` and registers the LaunchAgent. No sudo, no
+certificate, no network.
 
 | `SIGN_IDENTITY` | Designated requirement | Grants survive rebuild? |
 |---|---|---|
-| unset (Developer ID) | `identifier` + `subject.OU` | yes — and survives updates |
+| unset / `-` (ad-hoc, the default) | `cdhash H"…"` | **no** — new hash every compile |
 | `Apple Development: …` | `identifier` + `subject.CN` | yes |
-| `-` (ad-hoc) | `cdhash H"…"` | **no** — new hash every compile |
+| `Developer ID Application: …` | `identifier` + `subject.OU` | yes |
 
-Both non-ad-hoc requirements were confirmed hash-free by building with each. Since the driver does nothing at all without Accessibility *and* Input Monitoring, ad-hoc costs two re-grants per rebuild. Note a dev-signed build holds TCC grants separately from a release build, so switching between them costs one re-grant.
+Both non-ad-hoc requirements were confirmed hash-free by building with each.
+Since the driver does nothing at all without Accessibility *and* Input
+Monitoring, ad-hoc costs two re-grants per rebuild. A dev-signed build holds TCC
+grants separately from an ad-hoc one, so switching between them costs one
+re-grant either way.
 
-## Release state — v1.5.0 is live
+An Apple Development certificate is the single change that would most improve
+day-to-day work here, and nothing about the fork prevents it — there just is not
+one installed.
 
-Shipped 2026-08-17. The feed is live and Sparkle will offer this to any install that polls it.
+### What was audited before all this was removed
 
-- Release: `https://github.com/bencolson/Touchdown/releases/tag/v1.5.0`
-- Feed: `https://raw.githubusercontent.com/bencolson/Touchdown/main/appcast.xml`
+The published v1.5.0 build was independently audited on 2026-08-21, before it
+was ever installed. That audit is now **historical**: this fork no longer
+installs a published build, and `install-release.sh` is gone. The full detail is
+in the git history; the findings that still matter are general ones.
 
-Verified against the artifact **GitHub actually serves**, fetched fresh from the feed's own enclosure URL — not against the local build: byte length matches the enclosure (1107060), the live feed's `edSignature` verifies against the downloaded zip, `spctl` reports `accepted` / `source=Notarized Developer ID`, the stapled ticket survives the `ditto` round-trip, and the embedded `SUFeedURL` / `SUPublicEDKey` are correct.
-
-The release machine, its Developer ID certificate, its notarization profile and the Sparkle signing key all belong to the **upstream maintainer** — not to this working copy, which holds none of them.
-
-> **Redacted here.** Upstream's version of this file records his key-backup location and restore procedure, his Apple ID, and his certificate identity. That has been removed from this copy: it is third-party operational detail, unusable without his private keys, and it does not belong in a fork that may be pushed publicly. It remains in upstream's own `CLAUDE.md` if ever needed.
-
-The parts worth keeping, because they are general engineering facts rather than his infrastructure:
-
-- **The Sparkle key can no longer be regenerated**, only migrated. `PUBLIC_ED_KEY` is embedded in a published build, so if every copy of the private half is lost, no installed client can ever accept another update — there is no recovery path.
-- **Cut releases from a GUI login session.** `codesign` and `sign_update` reach private keys only with the login keychain unlocked in an `Aqua` session. Over SSH the keychain returns *"User interaction is not allowed"* and signing fails with `errSecInternalComponent`; run `security unlock-keychain` first if you must work remotely.
-- **`release.sh --no-push`** publishes the GitHub release and commits the appcast while leaving the push to you. Sparkle reads the feed from `main`, so an unpushed appcast means no installed copy sees the update yet — that gap is the review window. `--dry-run` publishes nothing but still notarizes when `NOTARY_PROFILE` is set.
+- The shipped binary imported **zero networking symbols** — no `URLSession`, no
+  `CFNetwork`, no sockets — and no `CGEventTapCreate`, so it could not read
+  keystrokes despite holding Accessibility. Imported symbols matched the
+  reviewed source one-to-one. The same is worth re-checking on any binary that
+  holds these two permissions, including the ones built here.
+- `build.sh` **re-signed** the vendored Sparkle with the project's own
+  certificate, which meant its signature could not prove it unmodified. The way
+  round that was to strip signatures and compare bytes against the official
+  release. Any vendored, re-signed dependency has this property — the signature
+  you end up checking is your own.
+- A designated requirement that pins **team rather than hash** is what lets TCC
+  grants survive an update. It is also what makes every future release a fresh
+  trust decision inherited automatically, which was the actual argument against
+  running the auto-updater at all.
 
 ## Established facts, so they are not re-derived
 
@@ -305,25 +310,16 @@ macOS keys Accessibility and Input Monitoring differently depending on signature
 | Ad-hoc | `cdhash` | Every rebuild revokes both permissions |
 | Developer ID | bundle ID + team ID | Grants survive rebuilds and updates |
 
-This is why the app is a bundle and why it is Developer ID signed. Both were bugs in the original: a bare binary in `/usr/local/bin` could not be granted Accessibility at all (`tccutil reset` reported *"No such bundle identifier"* — there was no record to toggle), and ad-hoc signing would have made every Sparkle update silently break the driver.
+**This is why the app is a bundle at all**, and it was a real bug in the original: a bare binary in `/usr/local/bin` could not be granted Accessibility (`tccutil reset` reported *"No such bundle identifier"* — there was no record to toggle), so the driver could never inject anything.
 
-Verify the requirement contains no hash:
+The second row is the trade this fork accepts. It is ad-hoc signed, so every rebuild revokes both permissions. That was unacceptable while an auto-updater could rebuild the app behind your back; with updates only ever happening because you ran `./install.sh` yourself, a re-grant you were already expecting is a fair price for depending on no certificate.
+
+Inspect what a given build pins with:
 
 ```bash
 codesign -d --requirements - ~/Applications/Touchdown.app
-# designated => identifier "com.bencolson.touchdown" and anchor apple generic
-#   and certificate leaf[subject.OU] = "99L757HY7N"
+# designated => cdhash H"..."        <- ad-hoc, grants die on rebuild
 ```
-
-Because it pins `subject.OU` — the **team** — and not a certificate, any Developer ID Application cert from the same team satisfies it. Issue a fresh one on a new build machine rather than exporting a private key.
-
-### Notarization is mandatory, not cosmetic
-
-Sparkle downloads updates over the network, so macOS quarantines them, and Gatekeeper rejects unnotarized Developer ID apps. An unnotarized update installs and then refuses to launch. `release.sh` therefore refuses to publish without `NOTARY_PROFILE`; `ALLOW_UNNOTARIZED=1` exists only for local testing.
-
-### Archive with `ditto`, never `zip`
-
-`zip` mangles a signed bundle's symlink farm and the signature stops validating. Verified by extracting a `ditto` archive and re-checking: *"valid on disk"*, *"satisfies its Designated Requirement"*.
 
 ### Never call `exit()` on a recoverable failure
 
@@ -331,15 +327,11 @@ The LaunchAgent uses `KeepAlive { SuccessfulExit = false }`, so any non-zero exi
 
 ### Single instance matters
 
-Sparkle relaunches the app itself after installing while launchd may also start one. Two instances would both attempt an exclusive HID seize and fight over the device, so the newer one exits.
+`install.sh` reloads the LaunchAgent while a hand-launched copy may still be running. Two instances would both attempt an exclusive HID seize and fight over the device, so the newer one exits. This used to matter more, when Sparkle could relaunch the app itself after installing an update.
 
-### Sparkle key is account-scoped
+### What CI checks
 
-`SPARKLE_KEY_ACCOUNT="touchdown"` in `version.sh` keeps this key distinct from other Sparkle keys that may exist on the build machine. Sparkle's own advice is that one key can serve all your apps, which holds only when they are equally trusted — this repo and its release pipeline are public, so a shared key would let a leak here forge updates for a private app. `--account` also means generating this key cannot clobber an existing one.
-
-### Releases are cut locally, not in CI
-
-`.github/workflows/build.yml` verifies compilation, bundle layout, ad-hoc signing and `@rpath` linkage. It deliberately does not release: that needs both private keys, and putting them in GitHub secrets would place the signing identity for all future updates on a shared runner. Ad-hoc builds skip `--options runtime` and `--timestamp`, which `codesign` rejects for ad-hoc signatures.
+`.github/workflows/build.yml` compiles, bundles, signs ad-hoc, and asserts three things that are otherwise invisible until something breaks on another machine: that the bundle embeds **no** frameworks and links nothing via `@rpath`, that the icon is present, and that `minos` is `11.0` rather than the runner's OS. It publishes nothing, because this fork releases nothing. Ad-hoc builds skip `--options runtime` and `--timestamp`, which `codesign` rejects for ad-hoc signatures.
 
 ## Known rough edges
 
@@ -347,5 +339,5 @@ Sparkle relaunches the app itself after installing while launchd may also start 
 - **Comments are still French.** Upstream is French throughout; user-facing strings were translated but ~109 comment lines were not, to keep the diff against upstream reviewable. Translating them is mechanical if desired.
 - **Swift 6 language mode is not enabled.** `swiftc` defaults to Swift 5 mode, which is why the mutable globals mutated from the C HID callback compile without concurrency errors. Do not add `-swift-version 6` expecting a no-op.
 - **`touchscreenMaxX/Y` are verified** as of 2026-08-21 — `16383` / `9599` are correct on this unit. See the calibration table above for the method and the raw numbers.
-- **A build's minimum OS was the build host's — now pinned.** `build.sh` passes `-target $(uname -m)-apple-macos11.0` as of 2026-11-03, so `LC_BUILD_VERSION` matches the `LSMinimumSystemVersion 11.0` in `Info.plist`. Without it `swiftc` stamps the host's version, and the macOS 27 upgrade turned that from theory into a live hazard: the first rebuild here produced `minos 27.2`, which would have refused to launch on the second machine had it still been on 26. To a user on an older OS that looks like "installs cleanly, then does nothing", with nothing in the log. The **published release is still affected**, depending on the maintainer's build host — the pin lives only on this fork. 11.0 is the real floor because vendored Sparkle 2.9.6 is `minos 11.0`; raise one without the other and the feed advertises a build some machines cannot run. Verify with `vtool -show-build <binary>`.
+- **A build's minimum OS was the build host's — now pinned.** `build.sh` passes `-target $(uname -m)-apple-macos11.0` as of 2026-11-03, so `LC_BUILD_VERSION` matches the `LSMinimumSystemVersion 11.0` in `Info.plist`. Without it `swiftc` stamps the host's version, and the macOS 27 upgrade turned that from theory into a live hazard: the first rebuild here produced `minos 27.2`, which would have refused to launch on the second machine had it still been on 26. To a user on an older OS that looks like "installs cleanly, then does nothing", with nothing in the log. The **published release is still affected**, depending on the maintainer's build host — the pin lives only on this fork. 11.0 used to be forced by the vendored Sparkle, which was itself `minos 11.0`; with Sparkle gone the only constraint left is the `LSMinimumSystemVersion` in `Info.plist`, so keep the two in step if you ever raise it. CI asserts the pin; verify by hand with `vtool -show-build <binary>`.
 - **Upstream attribution is intentional.** `README.md` credits the original author and notes the project's AI co-authorship. That describes upstream's work, not this fork's, and should not be stripped.

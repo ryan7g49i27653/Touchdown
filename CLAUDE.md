@@ -22,7 +22,7 @@ Controller is `wch.cn` VID `0x27c0` / PID `0x0859`.
 Read the log first — it is the diagnosis, and every branch below is a line from it:
 
 ```bash
-pgrep -f Touchdown; tail -20 /tmp/touchdown.log
+pgrep -x Touchdown; tail -20 ~/Library/Logs/Touchdown.log
 ```
 
 Then match the symptom. After a macOS upgrade it is almost always **1** or **2**.
@@ -104,6 +104,29 @@ Raw X spanned `160..16242` (insets 0.98% / 0.86% — symmetric). Raw Y spanned `
 **The 8.19% top inset is not a scale error, and the asymmetry does not contradict the symmetry test below.** Raw 0 maps to the origin edge regardless of scale, so top and left insets measure *tap placement only* and carry no information about calibration — that round of taps simply landed ~8mm below the top edge. The informative ends are bottom and right, and because sloppy tapping can only ever *enlarge* an inset, those two figures are **upper bounds** on scale error at the far edge: `maxY` cannot be too large by more than ~1.4%. Nothing overflowed past the panel edge either (710 of 720, 2538 of 2560), which rules out the max being too *small*. So the test bounds the error rather than measuring it, which is all a regression check needs — the 2026-08-21 taps were tighter and pinned it more precisely, and no constant has changed since.
 
 Four taps produced exactly four clicks, so the 50ms debounce still holds under exclusive capture on 27.
+
+### Code review — five fixes (2026-11-03)
+
+A hygiene/performance/security pass over the whole fork. The security half came out clean: the installed binary has **zero** networking symbols, links no network-capable framework, has no `CGEventTapCreate` (so it cannot read keystrokes despite holding Accessibility), no `system` / `posix_spawn` / `dlopen` / `NSTask`, no entitlements, and exactly one embedded path. That is a stronger result than the August audit of upstream's v1.5.0, because Sparkle — the only third-party code and the only route to the network — is gone.
+
+Five things were fixed.
+
+**1. The cursor could be hidden permanently.** `injectClick()` called `CGDisplayHideCursor`, then two `guard … else { return }` paths sat between it and the matching `CGDisplayShowCursor`. Those calls are *reference counted*, so each unbalanced hide raises the count for good and the cursor never comes back until the driver restarts. A `defer` now guarantees the pair. Verified with a control-flow harness: the old shape leaked 2 of 4 hides, the new one leaks none.
+
+**2. A `NotificationCenter` observer accumulated every 3 seconds.** `addObserver(forName:object:queue:using:)` returns a token the centre retains until `removeObserver`; it was being discarded. Because `attachDriver()` built a fresh `ScreenChangeObserver` and the device-not-found path re-enters `attachDriver()` every 3s, an unplugged panel added one observation per retry — after an hour, ~1200 of them, each replaying `setupScreen()` (≈6 printed lines) on any display change. Fixed at both ends: the token is now stored and released in `deinit`, and `attachDriver()` only builds the observer when `screenObserver == nil`. Reproduced before (3 handler calls for one notification) and verified after (1). The GCD timers, incidentally, did *not* meaningfully leak — superseded objects were being collected.
+
+**3. `pkill -f "$APP_NAME"` could kill unrelated processes.** `-f` matches the whole command line, so it matched any shell or editor whose arguments merely contained "Touchdown" — demonstrably including the shell running `install.sh`. Both scripts now use `pgrep -x` / `pkill -x`, which match the process name only.
+
+**4. The log sat in `/tmp`.** `/tmp` is `1777` and the file was `0644`, so any process on the machine could read display names, geometry, and — with `LogTouchPoints` on — every touch coordinate. The `LogTouchPoints` gate protected the content but not the location. It now lives at `~/Library/Logs/Touchdown.log`; `~/Library` and `~/Library/Logs` are both `0700`, so the directory protects the file whatever its own mode is. `install.sh` deletes the old `/tmp` copy on upgrade. **`logPath` in the source and `StandardOutPath`/`StandardErrorPath` in the plist must stay in step** — the *Open Log* menu item uses the former.
+
+**5. The panel-matching predicate existed twice.** `setupScreen()` and `checkForGeometryChanges()` each had their own copy of the `XENEON`/`Corsair` name test plus fallbacks. Two independent predicates that can disagree is *precisely* what produced the display bug below. There is now one `locateXeneonScreen()` returning a `ScreenMatch`, so the two callers cannot drift. A side effect: with a single display attached, `checkForGeometryChanges()` used to bail out entirely while `setupScreen()` fell back to `NSScreen.main`; they now agree.
+
+Two things were looked at and deliberately **not** changed:
+
+- **`updateScreenFromCurrentList()` on every HID event is not a performance problem.** Measured: `CGDisplayBounds` is ~11.2 µs, about 0.22% of one core at 200 events/s. It is redundant with the notification and the 2s timer, but it is not slow, and removing a geometry path has a worse track record here than leaving one.
+- **The ~40 ms of `usleep` per click is load-bearing.** The HID callback runs on the main run loop, so `injectClick()` blocks it for 10+20+10 ms, which caps click throughput and briefly stalls the menu bar. Those sleeps exist to let the system register the cursor warp before the click lands; removing them risks clicks going to the wrong place. Left alone deliberately.
+
+Also note `clickMode` and `captureMode` are never reassigned but are correctly `var`: they are source-level escape hatches (the HID-failure message tells you to edit `captureMode`), and `let` would raise dead-code warnings on the unused branch.
 
 ### App icon added (2026-11-03)
 
@@ -268,7 +291,7 @@ Also confirmed: 4 taps produced exactly 4 clicks, so the 50ms debounce holds und
 
 ### `LogTouchPoints`
 
-`injectClick()` logged a line per touch to `/tmp/touchdown.log` with no rotation and no purge, accumulating a detailed record of screen usage. Now gated behind a runtime flag, off by default:
+`injectClick()` logged a line per touch to `~/Library/Logs/Touchdown.log` with no rotation and no purge, accumulating a detailed record of screen usage. Now gated behind a runtime flag, off by default:
 
 ```bash
 defaults write com.bencolson.touchdown LogTouchPoints -bool true
@@ -362,5 +385,5 @@ The LaunchAgent uses `KeepAlive { SuccessfulExit = false }`, so any non-zero exi
 - **Swift 6 language mode is not enabled.** `swiftc` defaults to Swift 5 mode, which is why the mutable globals mutated from the C HID callback compile without concurrency errors. Do not add `-swift-version 6` expecting a no-op.
 - **`touchscreenMaxX/Y` are verified** as of 2026-08-21 — `16383` / `9599` are correct on this unit. See the calibration table above for the method and the raw numbers.
 - **A build's minimum OS was the build host's — now pinned.** `build.sh` passes `-target $(uname -m)-apple-macos11.0` as of 2026-11-03, so `LC_BUILD_VERSION` matches the `LSMinimumSystemVersion 11.0` in `Info.plist`. Without it `swiftc` stamps the host's version, and the macOS 27 upgrade turned that from theory into a live hazard: the first rebuild here produced `minos 27.2`, which would have refused to launch on the second machine had it still been on 26. To a user on an older OS that looks like "installs cleanly, then does nothing", with nothing in the log. The **published release is still affected**, depending on the maintainer's build host — the pin lives only on this fork. 11.0 used to be forced by the vendored Sparkle, which was itself `minos 11.0`; with Sparkle gone the only constraint left is the `LSMinimumSystemVersion` in `Info.plist`, so keep the two in step if you ever raise it. CI asserts the pin; verify by hand with `vtool -show-build <binary>`.
-- **`Warning: Window move completed without beginning` in the log is harmless.** AppKit emits it when the About panel is ordered front, and it lands in `/tmp/touchdown.log` because the LaunchAgent sends stderr there. Observed once per panel open, 32s after launch on 2026-11-03, i.e. exactly when About was clicked. Nothing in this app positions that window — it is the system panel — so there is nothing to fix. Worth knowing only because this log is the app's whole diagnostic surface, and an unexplained warning in it invites a hunt.
+- **`Warning: Window move completed without beginning` in the log is harmless.** AppKit emits it when the About panel is ordered front, and it lands in `~/Library/Logs/Touchdown.log` because the LaunchAgent sends stderr there. Observed once per panel open, 32s after launch on 2026-11-03, i.e. exactly when About was clicked. Nothing in this app positions that window — it is the system panel — so there is nothing to fix. Worth knowing only because this log is the app's whole diagnostic surface, and an unexplained warning in it invites a hunt.
 - **Upstream attribution is intentional.** `README.md` credits the original author and notes the project's AI co-authorship. That describes upstream's work, not this fork's, and should not be stripped.

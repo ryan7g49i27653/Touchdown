@@ -128,10 +128,10 @@ If the app doesn't appear in the list, drag `~/Applications/Touchdown.app` in di
 
 ```bash
 # Status
-pgrep -f Touchdown && echo "Running" || echo "Stopped"
+pgrep -x Touchdown && echo "Running" || echo "Stopped"
 
 # Logs
-tail -f /tmp/touchdown.log
+tail -f ~/Library/Logs/Touchdown.log
 
 # Stop
 launchctl unload ~/Library/LaunchAgents/com.bencolson.touchdown.plist

@@ -91,10 +91,26 @@ func injectClick(at point: CGPoint) {
     let mainScreenHeight = NSScreen.screens[0].frame.height
     let originalCGPosition = CGPoint(x: originalPosition.x, y: mainScreenHeight - originalPosition.y)
 
+    // CGDisplayHideCursor/ShowCursor sont comptés: chaque hide sans show
+    // incrémente définitivement le compteur et le curseur ne revient plus
+    // jusqu'au redémarrage du driver. Les deux `guard` plus bas sortaient de
+    // la fonction entre le hide et le show, donc un échec de création d'un
+    // CGEvent — rare, mais possible sous pression mémoire — faisait disparaître
+    // le curseur pour de bon. Le defer garantit la paire.
+    var cursorHidden = false
+    defer {
+        if cursorHidden {
+            usleep(10000) // 10ms avant de restaurer
+            CGWarpMouseCursorPosition(originalCGPosition)
+            CGDisplayShowCursor(CGMainDisplayID())
+        }
+    }
+
     switch clickMode {
     case .moveCursorAndClick:
         // Cacher le curseur pour éviter le curseur fantôme
         CGDisplayHideCursor(CGMainDisplayID())
+        cursorHidden = true
 
         // Téléporter le curseur
         CGWarpMouseCursorPosition(point)
@@ -127,15 +143,6 @@ func injectClick(at point: CGPoint) {
     mouseDown.post(tap: .cghidEventTap)
     usleep(20000) // 20ms entre down et up
     mouseUp.post(tap: .cghidEventTap)
-
-    // Restaurer la position originale du curseur
-    if clickMode == .moveCursorAndClick {
-        usleep(10000) // 10ms avant de restaurer
-        CGWarpMouseCursorPosition(originalCGPosition)
-
-        // Réafficher le curseur
-        CGDisplayShowCursor(CGMainDisplayID())
-    }
 
     if logTouchPoints {
         print("🖱️  Click injected at (\(Int(point.x)), \(Int(point.y)))")
@@ -211,33 +218,63 @@ func hidInputCallback(context: UnsafeMutableRawPointer?,
 // Configuration de l'écran
 // ============================================
 
+// Comment un écran est reconnu comme étant le panneau. Un seul endroit:
+// setupScreen() et checkForGeometryChanges() en avaient chacun leur copie, et
+// deux prédicats indépendants qui divergent sont exactement ce qui a produit
+// le bug d'écran d'août — le nom gagnait au démarrage, l'élimination gagnait
+// ensuite à chaque événement HID.
+enum ScreenMatch {
+    case byName(NSScreen)
+    case bySecondaryFallback(NSScreen)
+    case byMainFallback(NSScreen)
+
+    var screen: NSScreen {
+        switch self {
+        case .byName(let s), .bySecondaryFallback(let s), .byMainFallback(let s): return s
+        }
+    }
+}
+
+func locateXeneonScreen() -> ScreenMatch? {
+    let screens = NSScreen.screens
+
+    if let named = screens.first(where: {
+        $0.localizedName.contains("XENEON") || $0.localizedName.contains("Corsair")
+    }) {
+        return .byName(named)
+    }
+    // Repli: le deuxième écran, souvent l'externe.
+    if screens.count > 1 {
+        return .bySecondaryFallback(screens[1])
+    }
+    guard let main = NSScreen.main else { return nil }
+    return .byMainFallback(main)
+}
+
 func setupScreen() {
-    // Trouver l'écran Corsair Xeneon Edge
-    // Par défaut on prend l'écran principal, mais tu peux ajuster
-    
     let screens = NSScreen.screens
     print("📺 Displays detected:")
-    
+
     for (index, screen) in screens.enumerated() {
         let frame = screen.frame
         let name = screen.localizedName
         print("   [\(index)] \(name): \(Int(frame.width))x\(Int(frame.height)) @ (\(Int(frame.origin.x)), \(Int(frame.origin.y)))")
     }
-    
-    // Chercher l'écran Corsair (ou prendre le principal)
-    // Tu peux ajuster cette logique selon ta configuration
-    if let xeneonScreen = screens.first(where: { $0.localizedName.contains("XENEON") || $0.localizedName.contains("Corsair") }) {
-        targetScreen = xeneonScreen
+
+    switch locateXeneonScreen() {
+    case .byName(let screen):
+        targetScreen = screen
         print("✅ Xeneon Edge display found")
-    } else if screens.count > 1 {
-        // Prendre le deuxième écran (souvent l'externe)
-        targetScreen = screens[1]
+    case .bySecondaryFallback(let screen):
+        targetScreen = screen
         print("⚠️  Xeneon not identified by name, falling back to the secondary display")
-    } else {
-        targetScreen = NSScreen.main
+    case .byMainFallback(let screen):
+        targetScreen = screen
         print("⚠️  Only one display detected, using the main display")
+    case nil:
+        print("⚠️  No displays detected")
     }
-    
+
     updateScreenGeometry()
 }
 
@@ -318,11 +355,17 @@ var lastKnownScreenWidth: CGFloat = 0
 var lastKnownScreenHeight: CGFloat = 0
 
 class ScreenChangeObserver {
-    var timer: DispatchSourceTimer?
+    private var timer: DispatchSourceTimer?
+    private var observerToken: NSObjectProtocol?
 
     init() {
-        // Observer les changements de configuration d'écran (connexion/déconnexion)
-        NotificationCenter.default.addObserver(
+        // addObserver(forName:object:queue:using:) renvoie un jeton que
+        // NotificationCenter retient jusqu'à removeObserver. Le jeter laissait
+        // l'observation survivre à l'objet: attachDriver() recréant un
+        // observer à chaque réessai de périphérique (toutes les 3s), un simple
+        // changement d'écran finissait par rejouer setupScreen() des centaines
+        // de fois et noyer le journal.
+        observerToken = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
@@ -334,12 +377,20 @@ class ScreenChangeObserver {
         }
 
         // Timer GCD pour vérifier les changements de position
-        timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
-        timer?.schedule(deadline: .now() + 2.0, repeating: 2.0)
-        timer?.setEventHandler {
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
+        timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
+        timer.setEventHandler {
             checkForGeometryChanges()
         }
-        timer?.resume()
+        timer.resume()
+        self.timer = timer
+    }
+
+    deinit {
+        if let observerToken {
+            NotificationCenter.default.removeObserver(observerToken)
+        }
+        timer?.cancel()
     }
 }
 
@@ -353,10 +404,8 @@ func saveCurrentGeometry() {
 }
 
 func checkForGeometryChanges() {
-    // Chercher l'écran Xeneon dans la liste actuelle (qui est mise à jour par le système)
-    guard let currentXeneon = NSScreen.screens.first(where: {
-        $0.localizedName.contains("XENEON") || $0.localizedName.contains("Corsair")
-    }) ?? (NSScreen.screens.count > 1 ? NSScreen.screens[1] : nil) else {
+    // Même règle de sélection qu'au démarrage, via locateXeneonScreen().
+    guard let currentXeneon = locateXeneonScreen()?.screen else {
         return
     }
 
@@ -393,7 +442,14 @@ func checkAccessibilityPermission() -> Bool {
 // Icône de la barre de menus
 // ============================================
 
-let logPath = "/tmp/touchdown.log"
+// ~/Library/Logs plutôt que /tmp: /tmp est en 1777 et le journal y était en
+// 0644, donc lisible par n'importe quel processus de la machine — noms et
+// géométrie des écrans, et les coordonnées de chaque toucher quand
+// LogTouchPoints est actif. ~/Library et ~/Library/Logs sont en 0700, ce qui
+// protège le fichier par le répertoire quels que soient ses propres droits.
+// Doit rester synchronisé avec StandardOutPath/StandardErrorPath du plist.
+let logPath = (NSHomeDirectory() as NSString)
+    .appendingPathComponent("Library/Logs/Touchdown.log")
 
 // NSObject: les NSMenuItem ont besoin d'une cible Objective-C pour leurs actions.
 final class StatusController: NSObject {
@@ -584,8 +640,11 @@ func attachDriver() {
     findXeneonDisplayID()
     saveCurrentGeometry()
 
-    // Initialiser l'observer pour les changements d'écran
-    screenObserver = ScreenChangeObserver()
+    // Une seule fois. attachDriver() est rappelé toutes les 3s tant que le
+    // panneau est absent, et chaque appel installait un observer de plus.
+    if screenObserver == nil {
+        screenObserver = ScreenChangeObserver()
+    }
 
     print("""
 

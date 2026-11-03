@@ -20,6 +20,10 @@ APP="$HOME/Applications/$APP_NAME.app"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 PLIST_NAME="$BUNDLE_ID.plist"
 EXEC_PATH="$APP/Contents/MacOS/$APP_NAME"
+# Must match logPath in TouchscreenDriver.swift, which the Open Log menu opens.
+# ~/Library/Logs is 0700, so the log is not readable by other users -- unlike
+# /tmp, which is 1777 and where this used to live.
+LOG_PATH="$HOME/Library/Logs/$APP_NAME.log"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
@@ -33,9 +37,12 @@ if launchctl list 2>/dev/null | grep -q "$BUNDLE_ID"; then
     echo "⏹️  Unloading existing LaunchAgent..."
     launchctl unload "$LAUNCH_AGENTS_DIR/$PLIST_NAME" 2>/dev/null || true
 fi
-if pgrep -f "$APP_NAME" > /dev/null 2>&1; then
+# -x, not -f: -f matches the whole command line, so "pkill -f Touchdown"
+# also matches any shell or editor whose arguments merely contain the word --
+# including the shell running this script. -x matches the process name only.
+if pgrep -x "$APP_NAME" > /dev/null 2>&1; then
     echo "⏹️  Stopping existing driver..."
-    pkill -f "$APP_NAME" 2>/dev/null || true
+    pkill -x "$APP_NAME" 2>/dev/null || true
     sleep 1
 fi
 
@@ -69,15 +76,19 @@ cat > "$LAUNCH_AGENTS_DIR/$PLIST_NAME" <<PLIST
         <false/>
     </dict>
     <key>StandardOutPath</key>
-    <string>/tmp/touchdown.log</string>
+    <string>$LOG_PATH</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/touchdown.log</string>
+    <string>$LOG_PATH</string>
 </dict>
 </plist>
 PLIST
 echo "✅ LaunchAgent installed"
 
 echo "🚀 Starting..."
+mkdir -p "$(dirname "$LOG_PATH")"
+rm -f "$LOG_PATH"
+# Builds before 2026-11-03 logged to /tmp, which is world-readable. Clear the
+# old file on upgrade rather than leaving its contents sitting there.
 rm -f /tmp/touchdown.log
 launchctl load "$LAUNCH_AGENTS_DIR/$PLIST_NAME"
 
@@ -95,6 +106,6 @@ echo ""
 echo "Commands:"
 echo "  Stop:    launchctl unload ~/Library/LaunchAgents/$PLIST_NAME"
 echo "  Start:   launchctl load ~/Library/LaunchAgents/$PLIST_NAME"
-echo "  Status:  pgrep -f $APP_NAME && echo Running || echo Stopped"
-echo "  Logs:    tail -f /tmp/touchdown.log"
+echo "  Status:  pgrep -x $APP_NAME && echo Running || echo Stopped"
+echo "  Logs:    tail -f $LOG_PATH"
 echo "════════════════════════════════════════════════════════════"

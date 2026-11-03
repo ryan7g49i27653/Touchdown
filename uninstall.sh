@@ -28,9 +28,11 @@ if [ -f "$LAUNCH_AGENTS_DIR/$PLIST_NAME" ]; then
     echo "✅ LaunchAgent removed"
 fi
 
-if pgrep -f "$APP_NAME" > /dev/null 2>&1; then
+# -x, not -f: see the note in install.sh -- -f would match any process whose
+# command line merely contains the word, this script's own shell included.
+if pgrep -x "$APP_NAME" > /dev/null 2>&1; then
     echo "⏹️  Stopping driver..."
-    pkill -f "$APP_NAME" 2>/dev/null || true
+    pkill -x "$APP_NAME" 2>/dev/null || true
 fi
 
 if [ -d "$APP" ]; then
@@ -54,6 +56,8 @@ rm -f "$HOME/.local/bin/TouchscreenDriver"
 rm -rf "$HOME/Applications/TouchscreenDriver.app"
 rm -f "$LAUNCH_AGENTS_DIR/com.ymlaine.touchscreendriver.plist"
 
+rm -f "$HOME/Library/Logs/$APP_NAME.log"
+# Older layouts kept the log in /tmp.
 rm -f /tmp/touchdown.log /tmp/touchscreendriver.log
 
 # Drop the TCC records so a later reinstall prompts cleanly.

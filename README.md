@@ -54,11 +54,11 @@ Released builds are Developer ID signed and notarized, so the designated require
 
 ## Requirements
 
-- macOS 11+ (Big Sur or later) — but see the caveat below; a build only runs on the macOS version it was **built on** or newer
+- macOS 11+ (Big Sur or later)
 - Corsair Xeneon Edge connected via USB-C
 - Xcode Command Line Tools (`xcode-select --install`) — **only** to build from source; installing the release needs nothing
 
-> **Minimum-OS caveat.** `build.sh` does not pass `-target`, so `swiftc` stamps the *build host's* OS version into the binary's `LC_BUILD_VERSION`. A build produced on macOS 26 reports `minos 26.0` and will not launch on anything earlier, even though `Info.plist` still advertises `LSMinimumSystemVersion 11.0` — it installs cleanly and then does nothing. Check with `otool -l <binary> | grep -A3 LC_BUILD_VERSION`. Building on the machine you intend to run on avoids the problem entirely.
+> **Minimum OS is pinned, not inherited.** `build.sh` passes `-target $(uname -m)-apple-macos11.0`, so the binary's `LC_BUILD_VERSION` matches what `Info.plist` advertises regardless of which macOS the build host runs. Without that flag `swiftc` stamps the *host's* version instead — a build produced on macOS 27 would report `minos 27.2` and refuse to launch on anything earlier, installing cleanly and then doing nothing. The vendored Sparkle 2.9.6 is itself `minos 11.0`, so 11.0 is the real floor; raise one without the other and the feed advertises a build some machines cannot run. Check with `vtool -show-build <binary>`.
 
 ## Installation
 
@@ -163,7 +163,9 @@ launchctl load ~/Library/LaunchAgents/com.bencolson.touchdown.plist
 
 ## Updating
 
-Touchdown updates itself through [Sparkle](https://sparkle-project.org) 2.9.6, fed by `appcast.xml` in this repo. Installed copies check once a day, or on demand from the menu bar → **Check for Updates…**
+Releases are published through [Sparkle](https://sparkle-project.org) 2.9.6, fed by `appcast.xml` in this repo.
+
+> **This fork does not start the updater.** `StatusController` creates no `SPUStandardUpdaterController`, and the menu has no **Check for Updates…** item, so a build from this source never polls the feed and never installs an update — on purpose. The framework is still vendored and embedded, so restoring both is a one-commit revert. `appcast.xml`, `release.sh` and `install-release.sh` are untouched and still work; updating an installed copy means running `install-release.sh` or `install.sh` again.
 
 ### Why this needs a Developer ID
 

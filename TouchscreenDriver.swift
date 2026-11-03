@@ -5,7 +5,6 @@ import IOKit
 import IOKit.hid
 import CoreGraphics
 import AppKit
-import Sparkle
 
 // ============================================
 // Configuration pour Corsair Xeneon Edge
@@ -411,11 +410,12 @@ final class StatusController: NSObject {
     private let stateItem = NSMenuItem(title: "…", action: nil, keyEquivalent: "")
     private let displayItem = NSMenuItem(title: "…", action: nil, keyEquivalent: "")
 
-    // Sparkle. startingUpdater: true lance la vérification planifiée selon
-    // SUEnableAutomaticChecks / SUScheduledCheckInterval de l'Info.plist.
-    private let updater = SPUStandardUpdaterController(startingUpdater: true,
-                                                      updaterDelegate: nil,
-                                                      userDriverDelegate: nil)
+    // Pas d'updater Sparkle: le menu n'expose plus « Check for Updates… », et
+    // démarrer l'updater sans interface laisserait des vérifications
+    // automatiques injoignables — SUEnableAutomaticChecks vaut true dans
+    // l'Info.plist, et la préférence qui le désactive ne suit pas la machine.
+    // Le framework reste embarqué, donc rétablir les deux revient à annuler
+    // ce commit.
 
     // À appeler sur le thread principal avant NSApplication.run(), pour que
     // l'état « en attente de permission » soit déjà visible.
@@ -448,20 +448,6 @@ final class StatusController: NSObject {
                                  keyEquivalent: "")
         openLog.target = self
         menu.addItem(openLog)
-
-        menu.addItem(.separator())
-
-        let checkUpdates = NSMenuItem(title: "Check for Updates…",
-                                      action: #selector(checkForUpdates),
-                                      keyEquivalent: "")
-        checkUpdates.target = self
-        menu.addItem(checkUpdates)
-
-        let versionItem = NSMenuItem(
-            title: "Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")",
-            action: nil, keyEquivalent: "")
-        versionItem.isEnabled = false
-        menu.addItem(versionItem)
 
         menu.addItem(.separator())
 
@@ -524,13 +510,6 @@ final class StatusController: NSObject {
 
     @objc private func openLogFile() {
         NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
-    }
-
-    @objc private func checkForUpdates() {
-        // .accessory ne passe pas au premier plan tout seul: sans ça, la
-        // fenêtre de Sparkle s'ouvre derrière les autres applications.
-        NSApp.activate(ignoringOtherApps: true)
-        updater.checkForUpdates(nil)
     }
 
     @objc private func quitDriver() {

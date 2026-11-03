@@ -34,8 +34,22 @@ echo "🔨 Compiling $APP_NAME $VERSION..."
 # with a bare errno=2 that looks nothing like a missing directory.
 mkdir -p "$OUT_DIR"
 cd "$SCRIPT_DIR"
+# Pin the deployment target. Without -target, swiftc stamps LC_BUILD_VERSION
+# with the *build host's* OS, so a build made on macOS 27 gets minos 27.2 and
+# refuses to launch on anything older -- while Info.plist still advertises
+# LSMinimumSystemVersion 11.0. To a user on an older OS that looks like
+# "installs cleanly, then does nothing", with nothing in the log to explain it.
+#
+# 11.0 to match the plist. Keep the two in step: the vendored Sparkle sets the
+# real floor (2.9.6 is minos 11.0), so raising either without checking that
+# floor ships a binary the feed advertises to machines that cannot run it.
+#
+# uname -m rather than a literal arm64, so an Intel host still builds natively.
+TARGET="$(uname -m)-apple-macos11.0"
+
 # @executable_path/../Frameworks so the embedded Sparkle is found at runtime.
 swiftc TouchscreenDriver.swift -o "$OUT_DIR/.$APP_NAME.bin" \
+    -target "$TARGET" \
     -framework IOKit \
     -framework CoreFoundation \
     -framework CoreGraphics \

@@ -63,11 +63,14 @@ launchctl unload ~/Library/LaunchAgents/com.bencolson.touchdown.plist; sleep 2; 
 cd ~/Projects/touchdown && SIGN_IDENTITY=- ./install.sh
 ```
 
-If **4** or **6** ever fires, suspect the patched build was replaced. Auto-update is disabled, but confirm — a stock build reports `Active` and silently does nothing:
+If **4** or **6** ever fires, suspect the patched build was replaced — a stock build reports `Active` and silently does nothing. The fastest tell is the menu itself: this fork's build has **no *Check for Updates…* and no *Version* line**, so if either is present you are looking at a stock build. Confirm from the shell:
 
 ```bash
-defaults read com.bencolson.touchdown SUEnableAutomaticChecks   # expect 0
+otool -L ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c Sparkle   # 1 either way — framework is still embedded
+nm -u ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c SPUStandardUpdater   # expect 0 on this fork's build
 ```
+
+Nothing can replace it automatically — the updater is not started and the feed is never polled — so a swapped build means someone ran `install-release.sh`, or copied a bundle in.
 
 ## Machine roles
 
@@ -75,6 +78,44 @@ defaults read com.bencolson.touchdown SUEnableAutomaticChecks   # expect 0
 - **Build machine** — holds the Developer ID certificate and the Sparkle signing key, and is the only machine that cuts releases. Run `./setup-release-machine.sh` there to audit readiness.
 
 Keep the signing keys on the build machine only. Nothing needs to be exported to a client.
+
+## Status — macOS 27.2 verified (2026-11-03)
+
+The client was upgraded to macOS 27.2 (build 26B123, Xcode 27.2, Swift 6.4.2). **Nothing about the upgrade broke the driver**, and one assumption in this file turned out to be wrong in a good way.
+
+- **TCC grants survived the OS upgrade.** The break-glass section warns that a major upgrade can clear TCC; it did not. The binary was untouched, so the `cdhash` the grants pin to was unchanged and both held. A major upgrade is not by itself a reason to re-grant — read the log first, as always.
+- **Compiles clean against the 27.2 SDK**: zero warnings, no new deprecations. `IOHIDManagerOpen` with `kIOHIDOptionsTypeSeizeDevice`, `CGEvent.post(tap: .cghidEventTap)`, `CGWarpMouseCursorPosition`, `CGDisplayHideCursor` and `AXIsProcessTrustedWithOptions` are all unchanged.
+- **Swift 5 language mode is still the default** under the Swift 6.4.2 toolchain — the mutable globals mutated from the C HID callback still compile. The rough edge below still stands.
+- **Display selection still matches by name.** Three displays attached; `XENEON EDGE` matched directly and geometry survived six reconfiguration events.
+
+### Calibration re-confirmed on macOS 27
+
+Corner taps reverse-mapped through the injected coordinates, same method as the 2026-08-21 table. Panel at CGEvent origin `(855, 1440)`, so the panel spans `x: 855..3415`, `y: 1440..2160`.
+
+| Corner | Injected | Offset within panel | Raw X | Raw Y |
+|---|---|---|---|---|
+| top-left | `(890, 1499)` | `+35, +59` | 224 | 787 |
+| bottom-left | `(880, 2150)` | `+25, +710` | 160 | 9466 |
+| bottom-right | `(3393, 2138)` | `+2538, +698` | 16242 | 9306 |
+| top-right | `(3374, 1500)` | `+2519, +60` | 16121 | 800 |
+
+Raw X spanned `160..16242` (insets 0.98% / 0.86% — symmetric). Raw Y spanned `787..9466` (insets 8.19% / 1.39%).
+
+**The 8.19% top inset is not a scale error, and the asymmetry does not contradict the symmetry test below.** Raw 0 maps to the origin edge regardless of scale, so top and left insets measure *tap placement only* and carry no information about calibration — that round of taps simply landed ~8mm below the top edge. The informative ends are bottom and right, and because sloppy tapping can only ever *enlarge* an inset, those two figures are **upper bounds** on scale error at the far edge: `maxY` cannot be too large by more than ~1.4%. Nothing overflowed past the panel edge either (710 of 720, 2538 of 2560), which rules out the max being too *small*. So the test bounds the error rather than measuring it, which is all a regression check needs — the 2026-08-21 taps were tighter and pinned it more precisely, and no constant has changed since.
+
+Four taps produced exactly four clicks, so the 50ms debounce still holds under exclusive capture on 27.
+
+### Update UI removed (2026-11-03)
+
+The menu bar drop-down no longer has *Check for Updates…* or a *Version* line, and `StatusController` no longer builds an `SPUStandardUpdaterController`. Removing only the menu items would have left the updater running with no interface — `startingUpdater: true` schedules background checks independently of the menu, and `Info.plist` sets `SUEnableAutomaticChecks` true while the pref that disables it does not travel between machines. So the updater went too. Verify which build you are holding:
+
+```bash
+nm -u ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c SPUStandardUpdater   # 0 here, 1 on a stock build
+```
+
+Sparkle stays vendored, linked and embedded, so restoring the updater is a one-commit revert. `appcast.xml`, `release.sh` and `install-release.sh` are untouched.
+
+`build.sh` now pins `-target $(uname -m)-apple-macos11.0`. This became load-bearing rather than theoretical: the first rebuild on 27.2 stamped `minos 27.2`, which would have refused to launch on the second machine. See the rough edge below.
 
 ## Status — client bring-up complete (2026-08-21)
 
@@ -87,7 +128,7 @@ Getting there required fixing two real bugs — see *First hardware bring-up* be
 ### Deployment on this machine
 
 - `~/Applications/Touchdown.app`, **ad-hoc signed** (`SIGN_IDENTITY=-`), built from locally patched source — *not* the published release.
-- Sparkle auto-update **disabled**: `SUEnableAutomaticChecks` and `SUAutomaticallyUpdate` are both false under `com.bencolson.touchdown`. Menu bar → *Check for Updates…* still works on demand. These prefs are per-user and per-machine, so they do **not** travel with a copied bundle.
+- Sparkle **not started at all** since 2026-11-03: `StatusController` creates no `SPUStandardUpdaterController`, and the menu has no *Check for Updates…* and no *Version* line. The feed is never polled and there is no manual check either. This replaces the old pref-based arrangement, which was fragile for a reason worth keeping in mind: `SUEnableAutomaticChecks` / `SUAutomaticallyUpdate` are per-user *and* per-machine, so they never travelled with a bundle — a copy always arrived with auto-update **enabled**, because `Info.plist` sets `SUEnableAutomaticChecks` to true. The prefs are still set to false here, now redundantly. The framework stays vendored and embedded, so restoring the updater is a one-commit revert.
 - Per-touch coordinate logging **off by default** — see `LogTouchPoints` below.
 - Ad-hoc means **every rebuild revokes both permissions**. Budget a re-grant *and* a driver restart per rebuild. An Apple Development certificate would remove this cost entirely; none is installed here.
 
@@ -95,13 +136,20 @@ Getting there required fixing two real bugs — see *First hardware bring-up* be
 
 A second Mac (same Apple Silicon architecture, same panel) runs the same patched build. It was deployed by copying **source**, not the `.app` bundle, and building there with `SIGN_IDENTITY=- ./install.sh`.
 
-Prefer that over copying the bundle, for three reasons that all disappear when you build locally: the binary gets that machine's architecture; `minos` is stamped with *that* machine's OS rather than this one's (see the rough edge below); and a locally compiled app never acquires a quarantine attribute, so Gatekeeper never has to weigh in on an ad-hoc signature.
+Prefer that over copying the bundle, for two reasons that both disappear when you build locally: the binary gets that machine's architecture, and a locally compiled app never acquires a quarantine attribute, so Gatekeeper never has to weigh in on an ad-hoc signature. `minos` used to be a third reason; `build.sh` now pins it, so it no longer varies by host.
 
-Two things do **not** travel and must be redone per machine: the TCC grants, and the Sparkle auto-update prefs — both `defaults` keys are per-user and per-machine, so a copied bundle silently arrives with auto-update *enabled*.
+The **TCC grants** do not travel and must be redone per machine. The Sparkle prefs no longer matter either way, since nothing starts the updater — but if you ever revert that, they are per-user and per-machine, so a copied bundle arrives with auto-update *enabled*.
 
 ### Where the patched source lives
 
-This directory is **not a git checkout** — no `.git`, so the local patches have no history and there is no way to diff against upstream or pull his changes. The canonical copy of the patch is the PR above. `vendor/` (107 MB) is fetched by `fetch-sparkle.sh` and is regenerable; upstream's `.gitignore` excludes it along with `dist/`.
+This **is** a git checkout now — it was not when the note above was first written, and the claim that it had no history is stale. Layout:
+
+- **`local`** — the working branch, and what is deployed here. Carries the fork's patches *plus* the local working notes, so it is deliberately not a branch to push upstream.
+- **`main`** — tracks the published v1.5.0 state. No local patches.
+- **`fix-hid-lifetime-and-display-selection`** — the two bring-up fixes as clean, upstream-shaped hunks. This is what [bencolson/Touchdown#1](https://github.com/bencolson/Touchdown/pull/1) carries.
+- **`pin-deployment-target`**, **`sparkle-2.10.0`** — further candidates, written for upstream, not merged there. The deployment-target pin has since been applied on `local` directly, because rebuilding on macOS 27 made it load-bearing; `sparkle-2.10.0` is still only a branch.
+
+`vendor/` (107 MB) is fetched by `fetch-sparkle.sh` and is regenerable; `.gitignore` excludes it along with `dist/`. There is no `upstream` remote configured, so pulling the maintainer's changes means adding one.
 
 ## First hardware bring-up (2026-08-21)
 
@@ -282,5 +330,5 @@ Sparkle relaunches the app itself after installing while launchd may also start 
 - **Comments are still French.** Upstream is French throughout; user-facing strings were translated but ~109 comment lines were not, to keep the diff against upstream reviewable. Translating them is mechanical if desired.
 - **Swift 6 language mode is not enabled.** `swiftc` defaults to Swift 5 mode, which is why the mutable globals mutated from the C HID callback compile without concurrency errors. Do not add `-swift-version 6` expecting a no-op.
 - **`touchscreenMaxX/Y` are verified** as of 2026-08-21 — `16383` / `9599` are correct on this unit. See the calibration table above for the method and the raw numbers.
-- **A build's minimum OS is the build host's, not `LSMinimumSystemVersion`.** `build.sh` never passes `-target`, so `swiftc` stamps the host's version into `LC_BUILD_VERSION`. A build made on macOS 26 reports `minos 26.0` and will not launch on anything older, while `Info.plist` still advertises `LSMinimumSystemVersion 11.0`. To a user on an older OS this looks like "installs cleanly, then does nothing". Probably affects the published release too, depending on the maintainer's build host. Building on the target machine sidesteps it entirely — which is the main reason to prefer shipping source over a copied `.app`.
+- **A build's minimum OS was the build host's — now pinned.** `build.sh` passes `-target $(uname -m)-apple-macos11.0` as of 2026-11-03, so `LC_BUILD_VERSION` matches the `LSMinimumSystemVersion 11.0` in `Info.plist`. Without it `swiftc` stamps the host's version, and the macOS 27 upgrade turned that from theory into a live hazard: the first rebuild here produced `minos 27.2`, which would have refused to launch on the second machine had it still been on 26. To a user on an older OS that looks like "installs cleanly, then does nothing", with nothing in the log. The **published release is still affected**, depending on the maintainer's build host — the pin lives only on this fork. 11.0 is the real floor because vendored Sparkle 2.9.6 is `minos 11.0`; raise one without the other and the feed advertises a build some machines cannot run. Verify with `vtool -show-build <binary>`.
 - **Upstream attribution is intentional.** `README.md` credits the original author and notes the project's AI co-authorship. That describes upstream's work, not this fork's, and should not be stripped.

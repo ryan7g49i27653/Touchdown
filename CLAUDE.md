@@ -66,10 +66,18 @@ cd ~/Projects/touchdown && ./install.sh
 If **4** or **6** ever fires, suspect the patched build was replaced — a stock build reports `Active` and silently does nothing. The fastest tell is the menu: this fork's build has **no *Check for Updates…* and no *Version* line, and does have *About Touchdown***. Confirm from the shell:
 
 ```bash
-# This fork embeds no frameworks at all. A stock build has Sparkle in both.
+# Identify the build. 1.5.0 is upstream's version; this fork is 1.6.0+ and
+# stamps the exact source commit it was built from.
+plutil -p ~/Applications/Touchdown.app/Contents/Info.plist | grep -E 'VersionString|CFBundleVersion|TDSource'
+#   "CFBundleShortVersionString" => "1.6.0"   <- 1.5.0 means a stock build
+#   "CFBundleVersion"            => "35"      <- commit count
+#   "TDSourceCommit"             => "c29e814" <- "-dirty" = built from uncommitted work
+
+# Corroborate: this fork embeds no frameworks at all, a stock build has Sparkle.
 test -d ~/Applications/Touchdown.app/Contents/Frameworks && echo "STOCK BUILD" || echo "this fork"
-otool -L ~/Applications/Touchdown.app/Contents/MacOS/Touchdown | grep -c '@rpath/'   # expect 0
 ```
+
+`TDSourceCommit` also answers "is the second machine current?" — compare it against `git rev-parse --short HEAD`. The same three values appear in the menu bar's *About Touchdown*, as `Version 1.6.0 (35 · c29e814)`.
 
 Nothing can replace it automatically — there is no updater and no feed — so a swapped build means someone copied a bundle in by hand.
 
@@ -104,6 +112,22 @@ Raw X spanned `160..16242` (insets 0.98% / 0.86% — symmetric). Raw Y spanned `
 **The 8.19% top inset is not a scale error, and the asymmetry does not contradict the symmetry test below.** Raw 0 maps to the origin edge regardless of scale, so top and left insets measure *tap placement only* and carry no information about calibration — that round of taps simply landed ~8mm below the top edge. The informative ends are bottom and right, and because sloppy tapping can only ever *enlarge* an inset, those two figures are **upper bounds** on scale error at the far edge: `maxY` cannot be too large by more than ~1.4%. Nothing overflowed past the panel edge either (710 of 720, 2538 of 2560), which rules out the max being too *small*. So the test bounds the error rather than measuring it, which is all a regression check needs — the 2026-08-21 taps were tighter and pinned it more precisely, and no constant has changed since.
 
 Four taps produced exactly four clicks, so the 50ms debounce still holds under exclusive capture on 27.
+
+### Versioning (2026-11-03)
+
+`1.5.0` was **upstream's** version, and carrying it after removing the updater, adding an icon and an About panel and fixing five bugs made two very different builds indistinguishable. The fork is now `1.6.0`, and version identity is split three ways:
+
+| Field | Source | Means |
+|---|---|---|
+| `CFBundleShortVersionString` | `VERSION` in `version.sh`, by hand | marketing version; bump when a user would notice the change |
+| `CFBundleVersion` | `git rev-list --count HEAD` | monotonic build number, no one has to remember it |
+| `TDSourceCommit` | `git rev-parse --short HEAD` | the exact source, `-dirty` if the tree was not clean |
+
+Deriving the latter two means a build always identifies itself, which is what actually matters with two machines and ad-hoc builds that are otherwise interchangeable. Outside a git checkout — the second machine was deployed by copying source, which may arrive without `.git` — it degrades to build `0` / commit `unknown` rather than failing.
+
+**The version namespace now overlaps upstream's.** If they ever ship a `1.6.0`, it will not be this one. That is tolerable only because nothing compares versions mechanically any more: no appcast, no updater. The build number and commit are the real identifiers.
+
+A trap this closed: the startup banner had `v1.5.0` written into the ASCII box as a literal, independent of `version.sh`. Bumping the version would have desynced the banner from the Info.plist silently. The banner now reads `CFBundleShortVersionString` from the bundle and pads it to the box's 11-column field, falling back to `dev` for `run_driver.sh`, which runs the binary unbundled with no Info.plist to read. Alignment was checked for 3-, 5- and 7-character versions.
 
 ### Code review — five fixes (2026-11-03)
 

@@ -219,7 +219,7 @@ Display:
 | `HIDAnalyzer.swift` | Diagnostic tool to inspect raw HID reports |
 | `make-icon.swift` | Regenerates `Touchdown.icns`; not run by the build |
 | `Touchdown.icns` | App icon, committed so builds need no render step |
-| `version.sh` | Single source of truth for app name, bundle ID and version |
+| `version.sh` | App name, bundle ID and marketing version (build number comes from git) |
 | `build.sh` | Builds and signs `Touchdown.app` into a given directory |
 | `install.sh` | Builds, installs to `~/Applications`, registers the LaunchAgent |
 | `uninstall.sh` | Removes app, LaunchAgent, caches, TCC records, legacy layouts |

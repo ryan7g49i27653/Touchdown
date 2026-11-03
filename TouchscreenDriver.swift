@@ -600,6 +600,17 @@ final class StatusController: NSObject {
 
         var options: [NSApplication.AboutPanelOptionKey: Any] = [.credits: credits]
 
+        // Le panneau affiche « Version <CFBundleShortVersionString>
+        // (<CFBundleVersion>) ». On enrichit la parenthèse avec le commit
+        // d'origine, que build.sh grave dans TDSourceCommit: avec deux
+        // machines et des builds ad-hoc, « laquelle tourne quoi » ne se
+        // répond pas autrement.
+        let info = Bundle.main.infoDictionary
+        if let build = info?["CFBundleVersion"] as? String,
+           let commit = info?["TDSourceCommit"] as? String {
+            options[.version] = "\(build) · \(commit)"
+        }
+
         // Le panneau prend sinon NSApp.applicationIconImage, qui reste
         // générique tant que LaunchServices n'a pas indexé le bundle — cas
         // courant juste après une installation. On charge donc l'icône
@@ -748,9 +759,17 @@ func ensureSingleInstance() {
 }
 
 func main() {
+    // Lu depuis l'Info.plist, pas écrit en dur: la bannière répétait « v1.5.0 »
+    // en littéral alors que version.sh alimentait le plug-in de son côté —
+    // deux sources indépendantes qui divergent au premier changement de
+    // version. 11 = largeur du champ jusqu'au bord du cadre.
+    // « dev » couvre run_driver.sh, qui exécute le binaire hors bundle.
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    let versionField = "v\(version)".padding(toLength: 11, withPad: " ", startingAt: 0)
+
     print("""
     ╔════════════════════════════════════════════════════════════╗
-    ║   Touchdown - Corsair Xeneon Edge               v1.5.0     ║
+    ║   Touchdown - Corsair Xeneon Edge               \(versionField)║
     ║   Maps touches to absolute clicks                          ║
     ╚════════════════════════════════════════════════════════════╝
 

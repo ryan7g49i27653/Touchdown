@@ -30,7 +30,22 @@ EXEC_PATH="$APP/Contents/MacOS/$APP_NAME"
 
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
-echo "🔨 Compiling $APP_NAME $VERSION..."
+# CFBundleVersion is a build number, distinct from the marketing version in
+# version.sh. Deriving it from the commit count makes it monotonic without
+# anyone having to remember to bump it, and the short SHA pins the exact
+# source -- with two machines and ad-hoc builds, "which build is this?" is
+# otherwise unanswerable. Falls back gracefully: the second machine was
+# deployed by copying source, which may arrive without a .git directory.
+if BUILD_NUMBER="$(git -C "$SCRIPT_DIR" rev-list --count HEAD 2>/dev/null)" \
+   && [ -n "$BUILD_NUMBER" ]; then
+    SOURCE_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null)"
+    git -C "$SCRIPT_DIR" diff --quiet HEAD 2>/dev/null || SOURCE_COMMIT="$SOURCE_COMMIT-dirty"
+else
+    BUILD_NUMBER="0"
+    SOURCE_COMMIT="unknown"
+fi
+
+echo "🔨 Compiling $APP_NAME $VERSION (build $BUILD_NUMBER, $SOURCE_COMMIT)..."
 # swiftc writes straight into OUT_DIR, so it has to exist first or ld fails
 # with a bare errno=2 that looks nothing like a missing directory.
 mkdir -p "$OUT_DIR"
@@ -93,9 +108,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>$VERSION</string>
+    <string>$BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key>
     <string>$VERSION</string>
+    <key>TDSourceCommit</key>
+    <string>$SOURCE_COMMIT</string>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
     <key>LSUIElement</key>

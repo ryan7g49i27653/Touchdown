@@ -449,6 +449,12 @@ final class StatusController: NSObject {
 
         menu.addItem(.separator())
 
+        let about = NSMenuItem(title: "About Touchdown",
+                               action: #selector(showAbout),
+                               keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+
         let quit = NSMenuItem(title: "Quit Touchdown",
                               action: #selector(quitDriver),
                               keyEquivalent: "q")
@@ -508,6 +514,48 @@ final class StatusController: NSObject {
 
     @objc private func openLogFile() {
         NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
+    }
+
+    @objc private func showAbout() {
+        // .accessory ne passe pas au premier plan tout seul: sans ça, le
+        // panneau s'ouvre derrière les autres applications.
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+
+        let credits = NSAttributedString(
+            string: """
+                Touch support for the Corsair Xeneon Edge on macOS.
+
+                macOS ignores the panel's HID digitizer interface, so a tap \
+                clicks wherever the cursor already sits. Touchdown seizes that \
+                interface and injects a click at the point you touched.
+                """,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style,
+            ])
+
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [.credits: credits]
+
+        // Le panneau prend sinon NSApp.applicationIconImage, qui reste
+        // générique tant que LaunchServices n'a pas indexé le bundle — cas
+        // courant juste après une installation. On charge donc l'icône
+        // directement depuis Resources. Le nom vient de l'Info.plist pour
+        // rester aligné sur ce que build.sh y écrit.
+        let iconName = Bundle.main.infoDictionary?["CFBundleIconFile"] as? String ?? "Touchdown"
+        if let url = Bundle.main.url(forResource: iconName, withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            options[.applicationIcon] = icon
+        }
+
+        NSApp.orderFrontStandardAboutPanel(options: options)
     }
 
     @objc private func quitDriver() {

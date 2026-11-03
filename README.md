@@ -16,7 +16,7 @@ Without it, macOS ignores the panel's HID digitizer interface (usage page `0x0D`
 
 **No sudo.** Installs to `~/Applications` and `~/Library/LaunchAgents` instead of `/usr/local/bin`, which is root-owned. Nothing root-owned to clean up.
 
-**A menu bar icon** (`hand.rays`), so the driver's state is visible instead of log-only. Upstream runs completely invisibly — if it's stuck waiting on a permission or can't find the panel, there's no way to tell without `tail`ing a file in `/tmp`. The icon dims while waiting, goes solid when active, and turns red on failure. Its menu shows the target display and offers redetect / open log / quit.
+**A menu bar icon** (`hand.rays`), so the driver's state is visible instead of log-only. Upstream runs completely invisibly — if it's stuck waiting on a permission or can't find the panel, there's no way to tell without `tail`ing a file in `/tmp`. The icon dims while waiting, goes solid when active, and turns red on failure. Its menu shows the target display and offers redetect / open log / about / quit.
 
 **Survives failure instead of exiting.** Upstream calls `exit(1)` when the HID open is refused or the panel isn't found — which, under `KeepAlive`, is the same relaunch-loop trap as the permission bug. This fork reports the failure in the menu bar and stays up; a missing panel retries every 3s, so unplugging and replugging the Xeneon just works.
 
@@ -27,6 +27,8 @@ Without it, macOS ignores the panel's HID digitizer interface (usage page `0x0D`
 ## Menu bar
 
 The status item uses the `hand.rays` SF Symbol as a template image. The app icon uses `hand.tap.fill` instead — an outlined glyph with thin rays is right for a monochrome menu bar mark and turns to mush when rendered as icon art, so the two are drawn from different symbols on purpose.
+
+The menu shows the current state and target display, then offers **Redetect Display**, **Open Log**, **About Touchdown** and **Quit Touchdown**. About opens the standard macOS panel with the app icon, name, version and a one-paragraph description.
 
 | Icon | Meaning |
 |---|---|

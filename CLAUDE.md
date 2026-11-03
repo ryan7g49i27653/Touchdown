@@ -63,7 +63,7 @@ launchctl unload ~/Library/LaunchAgents/com.bencolson.touchdown.plist; sleep 2; 
 cd ~/Projects/touchdown && ./install.sh
 ```
 
-If **4** or **6** ever fires, suspect the patched build was replaced — a stock build reports `Active` and silently does nothing. The fastest tell is the menu: this fork's build has **no *Check for Updates…* and no *Version* line**. Confirm from the shell:
+If **4** or **6** ever fires, suspect the patched build was replaced — a stock build reports `Active` and silently does nothing. The fastest tell is the menu: this fork's build has **no *Check for Updates…* and no *Version* line, and does have *About Touchdown***. Confirm from the shell:
 
 ```bash
 # This fork embeds no frameworks at all. A stock build has Sparkle in both.
@@ -121,6 +121,19 @@ Two things worth not rediscovering:
 - **Outlined SF Symbols do not survive as icon art.** The first attempt reused `hand.rays` from the menu bar status item for continuity. It was an unreadable smudge at 16px and mush at 32px — the rays are hairlines. `hand.tap.fill` is filled and holds up. The menu bar keeps `hand.rays`, because a template image at menu bar size has the opposite constraint. Same reason the glyph drop shadow is skipped at or below 32px: the blur ends up wider than the strokes it sits under.
 
 The glyph is nudged off geometric centre (`-1.0%` x, `+1.8%` y) because its mass sits bottom-right while the tap arc is light and top-left.
+
+### About panel added (2026-11-03)
+
+*About Touchdown* in the menu opens `NSApp.orderFrontStandardAboutPanel` — the system panel, so it inherits dark mode, layout and localisation rather than being a hand-built window. It carries the app icon, name, version and a one-paragraph description passed as `.credits`.
+
+Two things in it are not obvious:
+
+- **`.accessory` apps do not come forward on their own.** Without an explicit `NSApp.activate…` first, the panel opens *behind* whatever is frontmost and looks like nothing happened. The removed *Check for Updates…* item had exactly the same hazard and the same fix. `activate(ignoringOtherApps:)` is deprecated from macOS 14, so it is behind an `#available` check — the plain `activate()` on 14+, the old call below that. Without the check the build warns, and the deployment target is 11.0 so the old path is still reachable.
+- **The icon is loaded explicitly, not inherited.** The panel otherwise takes `NSApp.applicationIconImage`, which stays generic until LaunchServices has indexed the bundle — common right after an install, which is exactly when someone opens About to check the build. So it reads `CFBundleIconFile` from the Info.plist and loads that `.icns` out of `Resources` directly. Taking the name from the plist rather than hard-coding it keeps it aligned with what `build.sh` writes.
+
+Note the panel *does* show the version, which the menu deliberately no longer does. That was about menu clutter; About is where a version belongs.
+
+A verification wrinkle: `strings` on the binary will not find `About Touchdown`, `Quit Touchdown` or `Open Log`. Swift stores string literals of 15 UTF-8 bytes or fewer inline in the `String` struct rather than in `__cstring`, so short menu titles are invisible to `strings` while `Redetect Display` (16 bytes) shows up. Grep for the `showAbout` selector instead.
 
 ### Sparkle removed entirely (2026-11-03)
 
@@ -349,4 +362,5 @@ The LaunchAgent uses `KeepAlive { SuccessfulExit = false }`, so any non-zero exi
 - **Swift 6 language mode is not enabled.** `swiftc` defaults to Swift 5 mode, which is why the mutable globals mutated from the C HID callback compile without concurrency errors. Do not add `-swift-version 6` expecting a no-op.
 - **`touchscreenMaxX/Y` are verified** as of 2026-08-21 — `16383` / `9599` are correct on this unit. See the calibration table above for the method and the raw numbers.
 - **A build's minimum OS was the build host's — now pinned.** `build.sh` passes `-target $(uname -m)-apple-macos11.0` as of 2026-11-03, so `LC_BUILD_VERSION` matches the `LSMinimumSystemVersion 11.0` in `Info.plist`. Without it `swiftc` stamps the host's version, and the macOS 27 upgrade turned that from theory into a live hazard: the first rebuild here produced `minos 27.2`, which would have refused to launch on the second machine had it still been on 26. To a user on an older OS that looks like "installs cleanly, then does nothing", with nothing in the log. The **published release is still affected**, depending on the maintainer's build host — the pin lives only on this fork. 11.0 used to be forced by the vendored Sparkle, which was itself `minos 11.0`; with Sparkle gone the only constraint left is the `LSMinimumSystemVersion` in `Info.plist`, so keep the two in step if you ever raise it. CI asserts the pin; verify by hand with `vtool -show-build <binary>`.
+- **`Warning: Window move completed without beginning` in the log is harmless.** AppKit emits it when the About panel is ordered front, and it lands in `/tmp/touchdown.log` because the LaunchAgent sends stderr there. Observed once per panel open, 32s after launch on 2026-11-03, i.e. exactly when About was clicked. Nothing in this app positions that window — it is the system panel — so there is nothing to fix. Worth knowing only because this log is the app's whole diagnostic surface, and an unexplained warning in it invites a hunt.
 - **Upstream attribution is intentional.** `README.md` credits the original author and notes the project's AI co-authorship. That describes upstream's work, not this fork's, and should not be stripped.

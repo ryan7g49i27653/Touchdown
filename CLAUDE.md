@@ -261,10 +261,29 @@ Getting there required fixing two real bugs — see *first hardware bring-up* be
 
 > **It is well behind as of 2026-11-03** and nothing in this section's "same build" claim holds until it is updated. It is missing the app icon, the About panel, the Sparkle removal, the five code-review fixes, the log move, the test suite and 1.6.0 — it is still on 1.5.0-era source. Nothing here can check it remotely; `TDSourceCommit` in its *About Touchdown* is the fastest way to see where it actually is.
 >
-> To bring it up to date:
+> To bring it up to date. **`git pull` alone is not enough** — it pulls whatever branch is checked out there, and it is not necessarily `local`:
 >
 > ```bash
-> cd ~/Projects/touchdown && git pull && ./install.sh
+> cd ~/Projects/touchdown
+> git fetch origin
+> git checkout local      # creates the tracking branch if it only exists on origin
+> git pull
+> ./install.sh
+> ```
+>
+> `origin/HEAD` points at `main`, so anything cloned fresh lands on `main` — which is **pure upstream**, 13 commits behind and still on 1.5.0. Three symptoms say you are on the wrong branch, and all three are loud rather than silent:
+>
+> - `git pull` reports *"Already up to date"* — `main` has not moved since August.
+> - The build starts **downloading Sparkle** (123 MB). Nothing on `local` touches the network at build time, so this alone means wrong branch.
+> - `codesign` fails with *"no identity found"*. `main`'s `build.sh` still defaults to the upstream maintainer's Developer ID, which exists on neither of these machines.
+>
+> If instead `git pull` says *"not a git repository"*, that machine got a **source copy without `.git`** — which is how it was originally deployed. Clone the fork there with `-b local` rather than trying to repair it.
+>
+> Confirm the update actually took, rather than assuming:
+>
+> ```bash
+> plutil -extract TDSourceCommit raw ~/Applications/Touchdown.app/Contents/Info.plist
+> git rev-parse --short HEAD      # the two must match
 > ```
 >
 > Then expect three things: both permissions need re-granting (new `cdhash`), its `/tmp/touchdown.log` is deleted and logging moves to `~/Library/Logs/Touchdown.log`, and the version jumps 1.5.0 → 1.6.0. If that machine is still on macOS 26, the `minos` pin means the build will run there — but check, because an unpinned build would not have.

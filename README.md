@@ -72,15 +72,30 @@ The menu shows the current state and target display, then offers **Redetect Disp
 
 > **Minimum OS is pinned, not inherited.** `build.sh` passes `-target $(uname -m)-apple-macos11.0`, so the binary's `LC_BUILD_VERSION` matches what `Info.plist` advertises regardless of which macOS the build host runs. Without that flag `swiftc` stamps the *host's* version instead — a build produced on macOS 27 would report `minos 27.2` and refuse to launch on anything earlier, installing cleanly and then doing nothing. Check with `vtool -show-build <binary>`; CI asserts it.
 
+## Branches
+
+**A fresh clone lands on `main`, which is not this fork's code.** The repository's default branch is still `main` for upstream-compatibility reasons, so clone `local` explicitly.
+
+| Branch | What it is |
+|---|---|
+| **`local`** | The fork. Everything this README describes, and what actually runs. **This is the one you want.** |
+| `main` | Pure upstream v1.5.0 — the original project by [Yves-Marie Lainé](https://github.com/ymlaine) plus [Ben Colson](https://github.com/bencolson)'s fork work, and nothing of this one's. None of the fixes, no icon, Sparkle still bundled, and its `build.sh` requires a Developer ID certificate you almost certainly do not have. It exists as the reference point the other branches sit on. |
+| `fix-hid-lifetime-and-display-selection` | The two hardware bring-up fixes as clean, upstream-shaped hunks — the head of the open PR to upstream. An ancestor of `local`, so it holds nothing `local` lacks. |
+| `pin-deployment-target` | The `minos` fix shaped for upstream, which still has that bug. Not merged there, and kept because it cannot be recovered from `local` — that copy is entangled with the Sparkle removal. |
+
+The Sparkle removal and the rest of this fork's divergence are deliberately **`local`-only**; `main` and the upstream-facing branches keep Sparkle because that is what upstream should receive. `CLAUDE.md` carries the full layout and the reasoning.
+
 ## Installation
 
 This fork builds from source. There is no published build to download.
 
 ```bash
-git clone https://github.com/bencolson/Touchdown.git
+git clone -b local https://github.com/ryan7g49i27653/Touchdown.git
 cd Touchdown
 ./install.sh
 ```
+
+The `-b local` is not optional — without it you get upstream's v1.5.0.
 
 Compiles, signs ad-hoc, installs to `~/Applications`, registers the LaunchAgent,
 and starts it. No sudo, no Developer ID, no network access during the build.
@@ -100,11 +115,7 @@ SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./install.sh
 ./uninstall.sh
 ```
 
-Or, if you installed from the release and have no clone:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bencolson/Touchdown/main/uninstall.sh | bash
-```
+It falls back to literals when `version.sh` is not beside it, so copying just that one file somewhere and running it works. Do **not** fetch upstream's copy instead — it only clears the log from `/tmp`, where this fork no longer writes, so it would leave `~/Library/Logs/Touchdown.log` behind.
 
 ### Grant Permissions
 

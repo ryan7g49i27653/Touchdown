@@ -271,7 +271,7 @@ Getting there required fixing two real bugs — see *first hardware bring-up* be
 > ./install.sh
 > ```
 >
-> `origin/HEAD` points at `main`, so anything cloned fresh lands on `main` — which is **pure upstream**, 13 commits behind and still on 1.5.0. (*The fork's default branch is `main`, and that is a trap*, below, covers removing this for good.) Three symptoms say you are on the wrong branch, and all three are loud rather than silent:
+> `origin/HEAD` points at `main`, so anything cloned fresh lands on `main` — which is **pure upstream** and still on 1.5.0 (`git rev-list --count main..local` for how far behind). (*The fork's default branch is `main`, and that is a trap*, below, covers removing this for good.) Three symptoms say you are on the wrong branch, and all three are loud rather than silent:
 >
 > - `git pull` reports *"Already up to date"* — `main` has not moved since August.
 > - The build starts **downloading Sparkle** (123 MB). Nothing on `local` touches the network at build time, so this alone means wrong branch.
@@ -299,7 +299,8 @@ The **TCC grants** do not travel and must be redone per machine. That is now the
 This **is** a git checkout now — it was not when the note above was first written, and the claim that it had no history is stale. Layout:
 
 ```
-main (7031ea1, pure upstream v1.5.0 -- every commit authored by the maintainer)
+main (7031ea1, pure upstream v1.5.0 -- Yves-Marie Laine's original project
+      plus Ben Colson's fork work; nothing of this fork's)
 ├── 5cae4e4  pin-deployment-target
 └── 9e9540e  fix-hid-lifetime-and-display-selection   <- PR #1 head
     └── ... → local

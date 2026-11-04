@@ -271,7 +271,7 @@ Getting there required fixing two real bugs — see *first hardware bring-up* be
 > ./install.sh
 > ```
 >
-> `origin/HEAD` points at `main`, so anything cloned fresh lands on `main` — which is **pure upstream**, 13 commits behind and still on 1.5.0. Three symptoms say you are on the wrong branch, and all three are loud rather than silent:
+> `origin/HEAD` points at `main`, so anything cloned fresh lands on `main` — which is **pure upstream**, 13 commits behind and still on 1.5.0. (*The fork's default branch is `main`, and that is a trap*, below, covers removing this for good.) Three symptoms say you are on the wrong branch, and all three are loud rather than silent:
 >
 > - `git pull` reports *"Already up to date"* — `main` has not moved since August.
 > - The build starts **downloading Sparkle** (123 MB). Nothing on `local` touches the network at build time, so this alone means wrong branch.
@@ -315,6 +315,28 @@ main (7031ea1, pure upstream v1.5.0 -- every commit authored by the maintainer)
 **The Sparkle removal is a `local`-only decision.** `main` and `fix-hid…` still carry Sparkle because that is what upstream should receive. Do not "tidy" them to match `local`.
 
 There is no `upstream` remote configured, so pulling the maintainer's changes means adding one. Expect conflicts in `build.sh` and `version.sh` — `local` has diverged structurally, not just by a patch or two.
+
+### The fork's default branch is `main`, and that is a trap
+
+`origin`'s HEAD is `refs/heads/main`, so **anything cloned fresh lands on pure upstream** — no tests, no icon, 1.5.0. That is the whole reason the second-machine instructions above have to check out `local` explicitly.
+
+Pointing the default at `local` removes the trap permanently. It is a GitHub setting, not something in the repo, so it has to be done by hand:
+
+- **Web:** the fork → Settings → General → Default branch → switch to `local`.
+- **`gh`** (not installed on this machine): `gh repo edit --default-branch local`.
+
+Then, in each existing clone, refresh the cached pointer — it does not update on its own:
+
+```bash
+git remote set-head origin -a
+```
+
+What it does **not** affect, checked rather than assumed:
+
+- **PR #1 is safe.** It lives in `bencolson/Touchdown` and its head is this fork's `fix-hid-lifetime-and-display-selection`. A default-branch change touches neither the head nor the base.
+- **CI is unaffected.** The workflow triggers on pushes to `main` and `local` by name; the default branch is not part of that.
+
+The one real consequence: the fork's landing page would show `local`, so `CLAUDE.md` and these working notes become the first thing a visitor sees instead of the user-facing `README.md` on `main`. Nothing new is exposed — `local` is already pushed — but it changes the shop window. Keeping `main` as the default is the conventional choice for a fork that still sends PRs upstream, which is why this is written down as a decision rather than just made.
 
 ## 2026-08-21 — first hardware bring-up: two bugs found
 
